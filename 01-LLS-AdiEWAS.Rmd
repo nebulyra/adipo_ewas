@@ -1,0 +1,921 @@
+---
+title: "An Epigenome-Wide Association Study (EWAS) between Adiponectin and whole blood DNA methylation (DNAm) levels in the Leiden Longevity Study (LLS)"
+author: "Lucy Sinke"
+output: html_document
+---
+
+```{r echo=FALSE}
+rm(list=ls())
+```
+
+```{r, setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/exports/molepi/users/ljsinke/LLS/Adi_Scripts")
+```
+
+***
+
+# Setup
+
+***
+
+Load packages
+
+```{r message=FALSE}
+library(SummarizedExperiment)
+library(haven)
+library(tidyverse)
+library(ggpubr)
+library(DNAmArray)
+library(minfi)
+library(limma)
+```
+
+***
+
+# DNA Methylation Data
+
+***
+
+Whole blood DNA methylation was profiled by the Infinium HumanMethylation450 BeadChip. Preprocessing and quality control was performed in R.
+
+DNA methylation is expressed as β values, which will be the response variable in all models. A `SummarizedExperiment` object containing this data, `betas`, is loaded in.
+
+```{r}
+load("../Shared_Data/LLS_betas.Rdata")
+betas
+```
+
+This contains DNA methylation data for 732 individuals at 483,871 CpG sites.
+
+***
+
+# Phenotypes
+
+***
+
+### Adiponectin
+
+Load in Adiponectin (mg/L) data from the LLS. 
+
+* `llnr_id` - ID variable
+* `age` - Age, a covariate
+* `adiponectin` - Adiponectin levels
+
+```{r}
+file_name <- "LLS_IOP1-450kDNAmethylation-AdiponectinLeptinIl6_20201009.sav"
+
+lls_cytokines <- read_sav(paste0("../Shared_Data/", file_name))
+
+lls_cytokines <- lls_cytokines %>% 
+  dplyr::select(llnr_id = LLnr, 
+                age = Age, 
+                adiponectin = Adiponectin) %>% 
+  filter(!is.na(adiponectin))
+
+summary(lls_cytokines)
+```
+
+***
+
+### Limit of Detection
+
+Remove values below LOD
+
+```{r}
+lls_cytokines <- lls_cytokines %>% 
+  mutate(
+    adiponectin = ifelse(lls_cytokines$adiponectin == 0, NA, adiponectin)
+  )
+
+summary(lls_cytokines$adiponectin)
+summary(lls_cytokines)
+```
+
+***
+
+### Normality
+
+Check the Normality of the Adiponectin level distribution.
+
+```{r warning=FALSE, message=FALSE}
+ggdensity(lls_cytokines$adiponectin, 
+          main = "Density plot of Adiponectin Levels",
+          xlab = "Adiponectin")
+
+ggqqplot(lls_cytokines$adiponectin)
+
+shapiro.test(lls_cytokines$adiponectin)
+
+summary(lls_cytokines$adiponectin)
+```
+
+***
+
+### Natural Log Transformation
+
+The distribution is negatively skewed, so it is natural log-transformed to improve Normality.
+
+```{r warning=FALSE}
+lls_cytokines$log_adi <- log(lls_cytokines$adiponectin)
+```
+
+
+***
+
+### Outlier Removal
+
+Any log(Adiponectin) values further than 3 IQR from the nearest quartile are excluded.
+
+```{r}
+summary(lls_cytokines$log_adi)
+
+lower_limit <- quantile(lls_cytokines$log_adi, na.rm=TRUE)[[2]] - 
+                      (3 * IQR(lls_cytokines$log_adi, na.rm=TRUE))
+print(paste0("The lower limit is ", round(lower_limit,2)))
+
+upper_limit <- quantile(lls_cytokines$log_adi, na.rm=TRUE)[[4]] +
+                      (3 * IQR(lls_cytokines$log_adi, na.rm=TRUE))
+print(paste0("The upper limit is ", round(upper_limit,2)))
+```
+
+One value outside of this range is excluded
+
+```{r}
+lls_cytokines <- lls_cytokines %>% 
+  mutate(
+     log_adi = ifelse(
+       lls_cytokines$log_adi < lower_limit | lls_cytokines$log_adi > upper_limit, 
+       NA, log_adi),
+     adiponectin = ifelse(
+       lls_cytokines$log_adi < lower_limit | lls_cytokines$log_adi > upper_limit, 
+       NA, adiponectin)
+)
+
+summary(lls_cytokines$adiponectin)
+summary(lls_cytokines)
+```
+
+***
+
+### Final Normality Check
+
+Check the Normality of the resulting distribution.
+
+```{r warning=FALSE}
+ggdensity(lls_cytokines$log_adi, 
+          main = "Density plot of log-transformed Adiponectin",
+          xlab = "log(Adiponectin)")
+
+ggqqplot(lls_cytokines$log_adi)
+shapiro.test(lls_cytokines$log_adi)
+summary(lls_cytokines$log_adi)
+```
+
+Normality is visually improved
+
+***
+
+# IDs
+
+***
+
+ID values are stored for the samples with DNA methylation data.
+
+```{r}
+targets <- data.frame(uuid = rownames(colData(betas)),
+                      run_id = colData(betas)$run_id)
+```
+
+***
+
+# Covariates
+
+***
+
+### Age
+
+Age is an a priori confounder and will be included in all models. It is stored with the cytokine data in `lls_cytokines`.
+
+```{r}
+summary(lls_cytokines$age)
+```
+
+***
+
+### Sex
+
+Sex is also an a priori confounder and is stored in the `colData` of the DNA methylation data. It is recoded as
+
+* 0 for males
+* 1 for females
+
+```{r}
+targets <- targets %>% 
+  mutate(
+    sex = factor(
+      case_when(
+         colData(betas)$sex == "male" ~ 0,
+         colData(betas)$sex == "female" ~ 1
+      ), labels = c("Male", "Female")))
+
+xtabs(~targets$sex, addNA=TRUE)
+```
+
+***
+
+### Smoking Status
+
+There will be a smoking sensitivity analysis. 
+
+Save smoking data, coded as:
+
+* 0 for never smokers
+* 1 for former smokers
+* 2 for current smokers
+
+```{r}
+targets <- targets %>% 
+  mutate(
+     smoking = factor(
+       case_when(
+          colData(betas)$smoking == "non-smoker" ~ 0,
+          colData(betas)$smoking == "former-smoker" ~ 1,
+          colData(betas)$smoking == "current smoker" ~ 2
+  ), labels = c("Never", "Former", "Current")))
+
+xtabs(~targets$smoking, addNA=TRUE)
+```
+
+***
+
+### Body Mass Index (BMI)
+
+There will be a BMI sensitivity analysis.
+
+BMI data is stored.
+
+```{r}
+targets$bmi <- colData(betas)$weight / ((colData(betas)$height/100)^2)
+
+summary(targets$bmi)
+```
+
+***
+
+### IDOL Cell counts
+
+IDOL cell counts have been predicted from DNA methylation for LLS
+
+```{r warning=FALSE, message=FALSE}
+counts <- read_tsv("../Shared_Data/LLS_countsUCB.tsv")
+colnames(counts) <- c("run_id", "CD8T", "CD4T", "NK", "Bcell", "Mono", "Gran")
+head(counts)
+```
+
+These are merged with the rest of the covariate data
+
+```{r}
+targets <- left_join(targets, counts, by = "run_id")
+```
+
+***
+
+### IDOL Extended Cell Counts
+
+IDOL Extended cell counts have been predicted from DNA methylation data in the LLS
+
+```{r}
+load("../Shared_Data/LLS_deconvolution.RData")
+
+LLS.prop <- LLS.prop %>% rownames_to_column(var="uuid")
+LLS.prop <- LLS.prop %>% dplyr::select(
+  uuid,
+  Mono_ext = Mono, 
+  NK_ext = NK, 
+  Bas_ext = Bas, 
+  Bmem_ext = Bmem, 
+  Bnv_ext = Bnv, 
+  CD4mem_ext = CD4mem, 
+  CD4nv_ext = CD4nv,
+  CD8mem_ext = CD8mem, 
+  CD8nv_ext = CD8nv, 
+  Eos_ext = Eos, 
+  Neu_ext = Neu,
+  Treg_ext = Treg
+)
+
+head(LLS.prop)
+```
+
+These are merged with the rest of the covariate data.
+
+```{r}
+targets <- left_join(targets, LLS.prop, by="uuid")
+```
+
+***
+
+### Technical covariates
+
+Technical effects are associated with the row number of the EPIC array. Additionally, the batch effect of plate number will be adjusted for. 
+
+```{r}
+targets$plate <- colData(betas)$sample_plate
+targets$row <- colData(betas)$sentrix_position
+```
+
+Plate will be a fixed effect, but row number will take continuous values depending on the row on the 450k chip.
+
+```{r}
+xtabs(~targets$row)
+targets <- targets %>% 
+  mutate(
+    row = as.numeric(substr(row, 3, 3)))
+xtabs(~targets$row)
+```
+
+***
+
+# Merging
+
+***
+
+The final structure of the covariate data:
+
+```{r}
+str(targets)
+```
+
+Load in the ID key for LLS
+
+```{r echo=FALSE}
+load("../Shared_Data/LLS_key.Rdata")
+```
+
+Keep only the IDs required
+
+```{r}
+lls_key <- lls_key %>% 
+  dplyr::select(
+    llnr_id, 
+    uuid)
+```
+
+Add `uuid` to the cytokine data
+
+```{r}
+lls_cytokines <- left_join(
+  lls_cytokines, 
+  lls_key, 
+  by="llnr_id")
+
+str(lls_cytokines)
+```
+
+Since `targets` is derived from `methData`, it contains only observations where we also have methylation data. Therefore, we merge the other datasets into targets, excluding observations where beta values are missing.
+
+```{r}
+targets <- left_join(
+  targets, 
+  lls_cytokines, 
+  by = "uuid")
+```
+
+Arrange columns in an intuitive order and remove `iop2_id`.
+
+```{r}
+targets <- targets %>% 
+  dplyr::select(
+    uuid, 
+    log_adi, adiponectin,
+    age, sex, 
+    plate, row,
+    CD8T, CD4T, NK, Bcell, Mono, Gran,
+    smoking, bmi,
+    Bas_ext, Bmem_ext, Bnv_ext, 
+    CD4mem_ext, CD4nv_ext, CD8mem_ext, CD8nv_ext, 
+    Eos_ext, Mono_ext, 
+    Neu_ext, NK_ext, Treg_ext
+    )
+targets <- zap_labels(targets)
+str(targets)
+```
+
+***
+
+# Exclusion Criteria
+
+***
+
+### Sex Chromosomes
+
+Probes from the X chromosome and the Y chromosome were excluded from the analysis. This excludes 11,263 probes from the analysis. 
+
+```{r}
+dim(betas)
+betas <- betas[!(seqnames(betas) %in% c("chrX", "chrY")),]
+dim(betas)
+```
+
+***
+
+### Encode Blacklist Regions
+
+Load in the CpGs within ENCODE blacklist regions
+
+```{r}
+load(
+    "/exports/molepi/users/ljsinke/LLS/Shared_Data/ENCODE_Blacklist/ENCODEBlacklist_CpGomit-450K.RData")
+```
+
+These 5,889 probes are excluded from the methylation data
+
+```{r}
+betas
+betas <- betas[!rownames(betas) %in% cpg_blacklist,]
+betas
+```
+
+***
+
+### Zhou probes
+
+Load in Zhou probes recommendations using `DNAmArray`
+
+```{r}
+maskProbes <- read_tsv("../Shared_Data/Manifests/HM450.hg19.manifest.tsv.gz")
+dim(maskProbes)
+```
+
+For general use, there are 60,466 probes to be excluded
+
+```{r}
+maskProbes <- maskProbes[maskProbes$MASK_general == TRUE,]$probeID
+length(maskProbes)
+```
+
+Remove 54,887 of these from the LLS data
+
+```{r}
+betas
+betas <- betas[!rownames(betas) %in% maskProbes,]
+betas
+```
+
+***
+
+### Outlier Removal
+
+Any data points outside the range of `LQ - 3 x IQR` to `UQ + 3 x IQR` were excluded. This included 1,325,525 values that were converted to NA. 
+
+```{r}
+xtabs(~is.na(assay(betas)))
+iqr_dnam <- apply(assay(betas), 1, function(x){
+  iqr <- IQR(x, na.rm = TRUE)
+  q1 <- quantile(x, na.rm=TRUE)[[2]]
+  q3 <- quantile(x, na.rm=TRUE)[[4]]
+  x <- ifelse((x <= q1 - (3*iqr) | x >= q3 + (3*iqr)), NA, x)
+})
+xtabs(~is.na(iqr_dnam))
+dim(iqr_dnam)
+```
+
+We replace the `assay` of `methData` with the new beta values.
+
+```{r}
+assay(betas) <- t(iqr_dnam)
+```
+
+***
+
+### Missingness
+
+Keep only the CpGs where less than 5% of sample values are missing
+
+This is all CpGs, representing high quality data
+
+```{r}
+perc_na <- rowSums(is.na(iqr_dnam))*100/ncol(iqr_dnam)
+summary(perc_na)
+
+betas <- betas[,perc_na <= 95]
+betas
+```
+
+Keep only the samples where less than 5% of CpGs are missing
+
+This is all samples, representing high quality data
+
+```{r}
+perc_na <- colSums(is.na(iqr_dnam))*100/nrow(iqr_dnam)
+summary(perc_na)
+
+betas <- betas[perc_na <= 95,]
+betas
+```
+
+***
+
+# Merging
+
+***
+
+Filter `targets` to only include samples in `betas`
+
+```{r}
+targets <- targets %>% 
+  filter(uuid %in% rownames(colData(betas)))
+```
+
+We double check that samples are in the correct order in `targets` before replacing `colData`
+
+```{r}
+rownames(targets) <- targets$uuid
+identical(rownames(targets), rownames(colData(betas)))
+```
+
+Add sample information to the `colData` of `methData` 
+
+```{r}
+colData(betas) <- DataFrame(targets)
+```
+
+***
+
+# Complete Data
+
+***
+
+### Base Model
+
+The EWAS can only be performed on individuals with observed values for all covariates
+
+```{r}
+dim(betas)
+betas <- subset(betas, 
+                select = rowSums(is.na(colData(betas)[, c(1:13)])) == 0)
+dim(betas)
+```
+
+This removes 73 individuals, so we have 659 in the main analysis
+
+***
+
+### Smoking Sensitivity Analysis
+
+Exclude those with missing data for smoking status.
+
+```{r}
+betas_smoke <- subset(betas, 
+                      select = rowSums(is.na(colData(betas)[, c(1:14)])) == 0)
+dim(betas_smoke)
+```
+
+This reduces the sample size to 592
+
+***
+
+### BMI Sensitivity Analysis
+
+Save data with complete BMI information.
+
+```{r}
+betas_bmi <- subset(betas, 
+                    select = rowSums(is.na(colData(betas)[, c(1:13,15)])) == 0)
+dim(betas_bmi)
+```
+
+This model's sample size is 658
+
+***
+
+### IDOl Extended Sensitivity Analysis
+
+Save data with extended cell count data.
+
+```{r}
+betas_idol <- subset(betas, 
+                     select = rowSums(is.na(colData(betas)[, c(1:13,16)])) == 0)
+dim(betas_idol)
+```
+
+This model's sample size is 578
+
+***
+
+# Save Covariates
+
+***
+
+Save targets
+
+```{r}
+save(targets, file = "../Adi_Data/Cohort_Results/LLS/targets_adi.Rdata")
+```
+
+***
+
+# EWAS
+
+***
+
+### Base Model
+
+The base model for the Adiponectin EWAS is:
+
+DNAm ~ log_adi + age + sex + CD8T + CD4T + NK + Bcell + Mono + plate + row
+
+* `age`, `row`, `CD4T`, `CD8T`, `NK`, `Bcell`, and `Mono` are all added as continuous fixed effects
+* `sex` and `plate` added as a categorical fixed effect
+
+Save the formula for the model
+
+```{r}
+metadata(betas)$formula <- ~log_adi + age + sex + CD8T + CD4T + NK + Bcell + Mono + plate + row
+```
+
+Create a design matrix
+
+```{r}
+design <- model.matrix(metadata(betas)$formula, 
+                       data=colData(betas))
+head(design)
+```
+
+Fit the model
+
+```{r}
+fit <- lmFit(assay(betas), design)
+```
+
+Store the effect sizes, SE, t-statistics, p-values, and sample size for `log_adi`
+
+```{r}
+beta <- fit$coefficients[, 2]
+SE <- fit$stdev.unscaled[, 2] * fit$sigma
+t <- beta / SE
+p <- 2 * pt(-abs(t), fit$df.residual)
+N <- ncol(design) + fit$df.residual
+```
+
+Adjust for multiple testing using FDR
+
+```{r}
+padj <- p.adjust(p, method="fdr")
+```
+
+Save the mean and standard deviation for each probe
+
+```{r}
+cpg_mean <- apply(assay(betas), 1, mean)
+cpg_se <- apply(assay(betas), 1, sd)
+```
+
+Save these results in a data frame, `limma_base` 
+
+```{r}
+limma_base <- data.frame(
+  cpg = rownames(fit$coefficients), 
+  cpg_mean, 
+  cpg_se,
+  beta, 
+  SE, 
+  p, 
+  padj, 
+  N)
+```
+
+Save the results
+
+```{r}
+save(limma_base, file="../Adi_Data/Cohort_Results/LLS/LLS_ln-adi_base.Rdata")
+```
+
+***
+
+### Smoking Sensitivity Analysis
+
+The first extended model for the Adiponectin EWAS is:
+
+DNAm ~ log_adi + age + sex + **smoking** + CD8T + CD4T + NK + Bcell + Mono + plate + row
+
+* `age`, `row`, `CD4T`, `CD8T`, `NK`, `Bcell`, and `Mono` are all added as continuous fixed effects
+* `sex`, `plate`, and `smoking` are added as categorical fixed effects
+
+Save the formula for the model
+
+```{r}
+metadata(betas_smoke)$formula <- ~log_adi + age + sex + smoking + CD8T + CD4T + NK + Bcell + Mono + plate + row
+```
+
+Create a design matrix
+
+```{r}
+design <- model.matrix(metadata(betas_smoke)$formula, 
+                       data=colData(betas_smoke))
+head(design)
+```
+
+Fit model
+
+```{r}
+fit <- lmFit(assay(betas_smoke), design)
+```
+
+Store the effect sizes, SE, t-statistics, p-values, and sample size for `log_adi`.
+
+```{r}
+beta <- fit$coefficients[, 2]
+SE <- fit$stdev.unscaled[, 2] * fit$sigma
+t <- beta / SE
+p <- 2 * pt(-abs(t), fit$df.residual)
+N <- ncol(design) + fit$df.residual
+```
+
+Adjust for multiple testing using FDR
+
+```{r}
+padj <- p.adjust(p, method="fdr")
+```
+
+Save these results in a data frame, `limma_base`
+
+```{r}
+limma_base <- data.frame(
+  cpg = rownames(fit$coefficients), 
+  beta, 
+  SE, 
+  p, 
+  padj, 
+  N)
+```
+
+Save the results.
+
+```{r}
+save(limma_base, file="../Adi_Data/Cohort_Results/LLS/LLS_ln-adi_ext1.Rdata")
+```
+
+***
+
+### BMI Sensitivity Analysis
+
+The second extended model for the Adiponectin EWAS is:
+
+DNAm ~ log_adi + age + sex + **BMI** + CD8T + CD4T + NK + Bcell + Mono + plate + row
+
+* `age`, `row`, `bmi`, `CD4T`, `CD8T`, `NK`, `Bcell`, and `Mono` are all added as continuous fixed effects
+* `sex` and `plate` are added as categorical fixed effects
+
+Save the formula for the model
+
+```{r}
+metadata(betas_bmi)$formula <- ~log_adi + age + sex + bmi + CD8T + CD4T + NK + Bcell + Mono + plate + row
+```
+
+Create a design matrix
+
+```{r}
+design <- model.matrix(metadata(betas_bmi)$formula, 
+                       data=colData(betas_bmi))
+head(design)
+```
+
+Fit model
+
+```{r}
+fit <- lmFit(assay(betas_bmi), design)
+```
+
+Store the effect sizes, SE, t-statistics, p-values, and sample size for `log_adi`.
+
+```{r}
+beta <- fit$coefficients[, 2]
+SE <- fit$stdev.unscaled[, 2] * fit$sigma
+t <- beta / SE
+p <- 2 * pt(-abs(t), fit$df.residual)
+N <- ncol(design) + fit$df.residual
+```
+
+Adjust for multiple testing using FDR
+
+```{r}
+padj <- p.adjust(p, method="fdr")
+```
+
+Save these results in a data frame, `limma_base`
+
+```{r}
+limma_base <- data.frame(
+  cpg = rownames(fit$coefficients), 
+  beta, 
+  SE, 
+  p, 
+  padj, 
+  N)
+```
+
+Save the results.
+
+```{r}
+save(limma_base, file="../Adi_Data/Cohort_Results/LLS/LLS_ln-adi_ext2.Rdata")
+```
+
+***
+
+### IDOL Extended Sensitivity Analysis
+
+The third extended model for the Adiponectin EWAS is:
+
+DNAm ~ log_adi + age + sex + Bas + Bmem + Bnv + CD4mem + CD4nv + CD8mem + CD8nv + Eos + Mono + NK + Treg + plate + row
+
+* `age`, `row`, `Bas`, `Bmem`, `Bnv`, `CD4mem`, `CD4nv`, `CD8mem`, `CD8nv`, `Eos`, `Mono`, `NK`, and `Treg` are all added as continuous fixed effects
+* `sex` and `plate` are added as categorical fixed effects
+
+We save the formula for the model.
+
+```{r}
+metadata(betas_idol)$formula <- ~log_adi + age + sex + plate + row + 
+  Bas_ext + Bmem_ext + Bnv_ext + 
+  CD4mem_ext + CD4nv_ext + CD8mem_ext + CD8nv_ext + 
+  Eos_ext + Mono_ext + NK_ext + Treg_ext 
+```
+
+Create a design matrix
+
+```{r}
+design <- model.matrix(metadata(betas_idol)$formula, 
+                       data=colData(betas_idol))
+head(design)
+```
+
+Fit model
+
+```{r}
+fit <- lmFit(assay(betas_idol), design)
+```
+
+Store the effect sizes, SE, t-statistics, p-values, and sample size for `log_adi`.
+
+```{r}
+beta <- fit$coefficients[, 2]
+SE <- fit$stdev.unscaled[, 2] * fit$sigma
+t <- beta / SE
+p <- 2 * pt(-abs(t), fit$df.residual)
+N <- ncol(design) + fit$df.residual
+```
+
+Adjust for multiple testing using FDR
+
+```{r}
+padj <- p.adjust(p, method="fdr")
+```
+
+Save these results in a data frame, `limma_base`
+
+```{r}
+limma_base <- data.frame(
+  cpg = rownames(fit$coefficients), 
+  beta, 
+  SE, 
+  p, 
+  padj, 
+  N)
+```
+
+Save the results.
+
+```{r}
+save(limma_base, file="../Adi_Data/Cohort_Results/LLS/LLS_ln-adi_ext3.Rdata")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

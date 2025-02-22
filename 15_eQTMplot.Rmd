@@ -1,0 +1,116 @@
+---
+title: "Correlations between genes and CpGs in blood"
+author: "Lucy Sinke"
+date: "10/7/2021"
+output: html_document
+params:
+  start_index: 1
+  end_index: 2
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_knit$set(root.dir = '/exports/molepi/users/ljsinke/LLS/Adi_Scripts/')
+```
+
+
+```{r warning=FALSE, message=FALSE}
+library(edgeR)
+library(cinaR)
+library(limma)
+library(tidyverse)
+library(GenomicFeatures)
+library(AnnotationHub)
+library(SummarizedExperiment)
+library(lme4)
+library(lmerTest)
+```
+
+Load gene ranges
+
+```{r}
+load('../Shared_Data/allGeneRanges.Rdata')
+load('../Shared_Data/genes_low-expression.Rdata')
+```
+
+Save gene starts and ends
+
+```{r}
+for(i in unique(names(gene_range))){
+  range <- gene_range[i]
+  start <- min(start(range))
+  end <- max(end(range))
+  chr <- seqnames(range)
+  if(i == unique(names(gene_range))[1]){
+    out_df <- data.frame(gene_ens = i,
+                    start_gene = start,
+                    end_gene = end,
+                    chr_gene = chr)
+  } else {
+    out <- data.frame(gene_ens = i,
+                    start_gene = start,
+                    end_gene = end,
+                    chr_gene = chr)
+    out_df <- rbind(out, out_df)
+  }
+}
+
+out_df
+```
+
+Add to eQTM, removing low expressed genes
+
+```{r}
+file_list <- list.files('../Adi_Data/eQTMs/')
+
+for(i in file_list){
+  load(paste0('../Adi_Data/eQTMs/', i))
+  df <- left_join(df, out_df, by='gene_ens')
+  if(i == file_list[1]){
+    eqtm <- df 
+    } else {
+      eqtm <- rbind(eqtm, df)
+    }
+}
+```
+
+Load CpG anno
+
+```{r}
+manifest_hg19 <- read_tsv(
+  "../Shared_Data/Manifests/HM450.hg19.manifest.tsv.gz")
+
+anno <- manifest_hg19 %>% 
+  dplyr::select(
+    cpg = probeID,
+    cpg_chr = CpG_chrm,
+    cpg_start = CpG_beg,
+    cpg_end = CpG_end,
+    gene_HGNC
+  ) %>% 
+  mutate(
+    cpg_chr = substr(cpg_chr,4,5)
+  )
+
+anno <- anno %>% 
+  dplyr::filter(cpg %in% eqtm$cpg)
+
+eqtm <- left_join(eqtm, anno, by='cpg')
+```
+
+Save all
+
+```{r}
+save(eqtm, file='../Adi_Data/eQTMs/eqtm.Rdata')
+```
+
+Save low
+
+```{r}
+eqtm <- eqtm %>% filter(!gene_ens %in% low_exp)
+```
+
+Save low expressed genes
+
+```{r}
+save(eqtm, file='../Adi_Data/eQTMs/eqtm_noLow.Rdata')
+```

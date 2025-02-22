@@ -1,0 +1,3 @@
+# Performing TFBS enrichment analysis
+
+findMotifsGenome.pl Adi_HomerInput.tsv hg19 Adi/ -size 50

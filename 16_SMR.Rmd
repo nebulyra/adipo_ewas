@@ -1,0 +1,489 @@
+---
+title: "Adiponectin EWAS - Script 16: Colocalization analysis for Adi CpGs and genes within 100kb"
+author: "Lucy Sinke"
+date: "11/16/2022"
+output: html_document
+---
+
+```{r echo=FALSE}
+rm(list=ls())
+```
+
+Load packages
+
+```{r warning=FALSE, message=FALSE}
+library(TwoSampleMR)
+library(tidyverse)
+library(ieugwasr)
+library(jsonlite)
+```
+
+
+# Read in data
+Read in coloc results and save colocalized CpGs
+
+```{r}
+load('../Adi_Data/Results/AdiTop_2024.Rdata')
+```
+
+Look at investigated CpGs
+
+```{r}
+length(unique(top$cpg))
+cpg_list <- unique(top$cpg)
+```
+
+# Adiponectin GWAS data
+
+```{r}
+adi_dat <- read_tsv('../Adi_Data/GWAS/GCST90293085.tsv')
+```
+
+Format
+
+```{r}
+adi_dat <- adi_dat %>% 
+  select(
+    SNP=rs_id, chr=chromosome,  
+    beta.outcome = beta,
+    se.outcome = standard_error,
+    samplesize.outcome = n,
+    pval.outcome = p_value,
+    eaf.outcome = effect_allele_frequency,
+    effect_allele.outcome = effect_allele,
+    other_allele.outcome = other_allele) %>% 
+  mutate(
+    outcome = 'Adiponectin',
+    id.outcome = 'Adiponectin')
+```
+
+# DNAm --> IL-6
+
+```{r}
+qtl_files <- list.files('../Adi_Data/MR/cis_mQTLs/')
+```
+
+
+Loop through CpGs
+
+```{r}
+for(i in cpg_list){
+  print(paste0('Looking at ', i))
+  
+  # Exposure data for CpGs (mQTLs) - downloaded from GoDMC 
+  tryCatch({
+    exposure_dat <- fromJSON(
+      paste0('http://api.godmc.org.uk/v0.1/assoc_meta/cpg/',
+             i))$assoc_meta
+  
+  # Save
+  write_csv(exposure_dat,
+            file=paste0('../Adi_Data/MR/cis_mQTLs/',i,'.csv'))
+  
+  if(paste0(i,'.csv') %in% qtl_files){
+    exposure_dat <- read_csv(paste0('../Adi_Data/MR/cis_mQTLs/',i,'.csv'))
+  }
+  
+  # Format
+  exposure_dat <- exposure_dat %>% 
+    filter(a1 != 'I' & a1 != 'D') %>% #Remove indels
+    filter(cistrans == TRUE) %>%  # Keep only cis-mQTLs
+    select(SNP = rsid, 
+           beta = beta_a1, se,
+           effect_allele = a1, other_allele = a2, 
+           Phenotype = cpg, 
+           position = snp, samplesize, pval)
+  
+  print(paste0(i, ' has ', 
+               nrow(exposure_dat), ' cis-mQTLs in GoDMC...'))
+  
+  if(nrow(exposure_dat)!=0){
+    exposure_dat <- format_data(exposure_dat, type = 'exposure')
+    exposure_dat <- exposure_dat %>% arrange(pval.exposure)
+      
+    # Keep only mQTLs in IL-6 data
+    exposure_dat <- exposure_dat %>% 
+      filter(SNP %in% adi_dat$SNP) 
+    print(paste0(nrow(exposure_dat), 
+                   ' of these are in the adiponectin data...'))
+      
+    # Clumping
+    if(nrow(exposure_dat)!=0){
+      exposure_dat <- clump_data(exposure_dat)
+      print(paste0(nrow(exposure_dat), 
+                     ' of these are independent...'))
+      print(exposure_dat$SNP)
+        
+      # Outcome data from GWAS
+      # Keep only matching SNPs
+      outcome_dat <- adi_dat %>% 
+        filter(SNP %in% exposure_dat$SNP)
+      print(paste0(nrow(outcome_dat), 
+                     ' of these are in the adi summary data...'))
+        
+      print(exposure_dat)
+      print(outcome_dat)
+      
+      # Harmonise data
+      if(nrow(outcome_dat)!=0){
+        dat <- harmonise_data(exposure_dat, outcome_dat)
+          
+        # Perform SMR
+        res <- mr(dat)
+        print(res)
+        
+        vars <- ls()
+        
+        if(("res" %in% vars) & !("res_full" %in% vars)) {
+          res_full <- res
+          dat_full <- dat
+        } else if (("res" %in% vars) & ("res_full" %in% vars)) {
+          res_full <- rbind(res, res_full)
+          dat_full <- rbind(dat, dat_full)
+        } else {
+          print(paste0('No results for', i))
+        }
+      }
+    }
+  }
+  }, error=function(e){})
+}
+```
+
+Adjust p-values
+
+```{r}
+res_full$padj <- p.adjust(res_full$pval, method='fdr')
+res_full <- res_full %>% arrange(padj) 
+print(res_full)
+```
+
+Save
+
+```{r}
+save(res_full, dat_full, file='../Adi_Data/DNAm_to_Adi.Rdata')
+write_csv(res_full, file='../Adi_Data/Tables/ST11.csv')
+```
+
+***
+# Adiponectin --> DNAm
+Exposure data
+
+```{r}
+adi_snps <- read_tsv('../Adi_Data/GWAS/gwas-association.tsv')
+adi_snps <- adi_snps %>% select(SNP=SNPS, pos.exposure=CHR_POS)
+
+adi_snps
+```
+
+```{r}
+exposure_dat <- adi_dat %>% 
+  select(
+    SNP, chr.exposure = chr,  
+    beta.exposure = beta.outcome,
+    se.exposure = se.outcome,
+    samplesize.exposure = samplesize.outcome,
+    pval.exposure = pval.outcome,
+    eaf.exposure = eaf.outcome,
+    effect_allele.exposure = effect_allele.outcome,
+    other_allele.exposure = other_allele.outcome) %>% 
+  mutate(
+    exposure = 'Adiponectin',
+    id.exposure = 'Adiponectin') %>% 
+  filter(SNP %in% adi_snps$SNP)
+
+exposure_dat <- left_join(exposure_dat, adi_snps, by='SNP')
+
+exposure_dat
+```
+
+Save list of SNPs
+
+```{r}
+snplist <- paste0('chr', 
+                  exposure_dat$chr.exposure[1],
+                  ':',
+                  (exposure_dat$pos.exposure[1] - 100000):(exposure_dat$pos.exposure[1] + 100000))
+
+for(i in 2:nrow(exposure_dat)){
+  snplist <- c(snplist, paste0('chr', 
+                  exposure_dat$chr.exposure[i],
+                  ':',
+                  (exposure_dat$pos.exposure[i] - 100000):(exposure_dat$pos.exposure[i] + 100000)))
+}
+```
+
+Outcome data - trans-mQTLs from GoDMC
+
+```{r}
+file_list <- list.files('../../GOTO/main/Study1_GOTO/MR/17/', pattern = '17')
+```
+
+Scan function
+
+```{r}
+mqtl_scan <- function(x) {
+  print(x)
+  mqtl_data <- read_tsv(paste0('../../GOTO/main/Study1_GOTO/MR/17/',x))
+  mqtl_data <- separate(mqtl_data, MarkerName, c('snp', 'cpg'), '_')
+  mqtl_data$snp <- sub("(:[^:]+):.*", "\\1", mqtl_data$snp)
+  mqtl_data <- mqtl_data %>% filter(snp %in% snplist)
+  save(mqtl_data, file=paste0('../Adi_Data/MR/trans_mQTLs/',x,'.Rdata'))
+}
+```
+
+Run scan
+
+```{r eval=FALSE}
+for(i in file_list[1:50]){
+  mqtl_scan(i)
+}
+```
+
+Clumping
+
+```{r}
+exposure_dat <- clump_data(exposure_dat)
+print(paste0('Adiponectin has ', nrow(exposure_dat), 
+             ' independent instrumental SNPs'))
+```
+
+Map SNPs
+
+```{r}
+key <- exposure_dat %>% 
+  dplyr::select(SNP, chr.exposure, pos.exposure) %>% 
+  mutate(snp = paste0('chr', chr.exposure, ':', pos.exposure))
+key <- key %>% dplyr::select(SNP, snp)
+```
+
+Load trans mQTLs
+
+```{r}
+file_list <- list.files('../Adi_Data/MR/trans_mQTLs/')
+```
+
+Format outcome data
+
+```{r}
+ld_qtls <- data.frame()
+for(i in file_list) {
+  load(paste0('../Adi_Data/MR/trans_mQTLs/',i))
+  ld_qtls <- rbind(mqtl_data, ld_qtls)
+}
+
+ld_qtls <- unique(ld_qtls)
+```
+
+
+Make chr and pos vars
+
+```{r}
+ld_qtls <- ld_qtls %>% 
+  separate(snp, into=c('chr', 'pos'), sep=':', remove=FALSE) %>% 
+  mutate(chr = sub('chr', '', chr)) %>% 
+  mutate(chr = as.numeric(chr),
+         pos = as.numeric(pos))
+```
+
+Save
+
+```{r}
+head(ld_qtls)
+str(ld_qtls)
+save(ld_qtls, file = paste0('../Adi_Data/MR/Adi_LD.Rdata'))
+```
+
+```{r}
+load('../Adi_Data/MR/Adi_LD.Rdata')
+```
+
+
+Find LD proxy for 10 SNPs
+
+```{r}
+str(exposure_dat)
+print(exposure_dat$SNP)
+```
+
+
+```{r}
+for(i in exposure_dat$SNP){
+  expo <- exposure_dat %>% filter(SNP == i)
+  print(paste0('Exposure SNP: ', expo$SNP))
+  print(paste0('Located on chr ', expo$chr.exposure,
+               ' at position ', expo$pos.exposure, 
+               ' with effect allele ', expo$effect_allele.exposure,
+               ' and other allele ', expo$other_allele.exposure))
+  
+  proxy_df <- read_tsv(paste0('../Adi_Data/LD/Proxy/',
+                              i,'.txt'))
+  print(paste0('We load in ', nrow(proxy_df), 
+               'SNPs that are LD proxies for this SNP'))
+  
+  proxy_df <- proxy_df %>% arrange(desc(R2), abs(Distance))
+  print(paste0('The most correlated, closest SNP is ',
+               proxy_df$RS_Number[1], ' with R2 ',
+               proxy_df$R2[1], ' and distance ', 
+               proxy_df$Distance[1], ' bps, with alleles ',
+               proxy_df$Alleles[1]))
+  
+  ld_pot <- ld_qtls %>% filter(snp %in% proxy_df$Coord)
+  print(paste0('We saved all available mQTLs within 1Mb of ', i))
+  print(paste0(length(unique(ld_pot$snp)), 
+               ' of these are LD proxies for ', i))
+  print(head(ld_pot))
+  
+  proxy_df <- proxy_df %>% filter(Coord %in% ld_pot$snp)
+  print(paste0(nrow(proxy_df), 
+               ' of these are in the LD proxy data'))
+  print(paste0('The best match is ', 
+               proxy_df$RS_Number[1], ' (',
+               proxy_df$Coord[1], ') with R2 ',
+               proxy_df$R2[1], ' and distance ',
+               proxy_df$Distance[1], 'bps, with alleles ',
+               proxy_df$Alleles[1]))
+  
+  print('---------------')
+}
+```
+
+1. rs10778506 (12:106749482) (T/C) - most correlated mQTL has R2 0.0184, which is too low (rs10047654 - chr12:106849036).
+
+2. rs10886863 (10:121169979) (T/C) - no LD proxy mQTL available
+
+**3. rs11023332 (11:14762564) (C/G) - mQTL data available: rs11023332 (chr11:14784110) with R2 1 and distance 0bps, with alleles (G/C)**
+
+4. rs11045172 (12:20317287) (C/A) - no LD proxy mQTL available
+
+**5. rs1108842 (3:52686064) (C/A) - mQTL data available: rs1108842 (chr3:52720080) with R2 1 and distance 0bps, with alleles (A/C)**
+
+**6. rs12051272 (16:82629683) (T/G) - mQTL data available: rs12051272 (chr16:82663288) with R2 1 and distance 0bps, with alleles (G/T)**
+
+7. rs13131633 (4:88818328) (T/C) - no LD proxy mQTL available
+
+8. rs1515108 (2:226258370) (T/C)- no LD proxy mQTL available
+
+9. rs17366568 (3:186852664) (A/G) - most correlated mQTL has R2 0.013, which is too low (rs2239612 - chr3:186793242)
+
+10. rs2061155 (1:219491666) (T/C) - no LD proxy mQTL available
+
+**11. rs222852 (17:7237287) (G/A) - LD proxy available rs113086489 (chr17:7171356) with R2 0.8653 and distance 30750bps, with alleles (C/T)**
+
+12. rs2980879 (8:125469233) (T/A) - no LD proxy mQTL available
+
+13. rs333947 (1:109928142) (A/G) - no LD proxy mQTL available
+
+14. rs596359 (6:153135918) (T/C) - no LD proxy mQTL available
+
+15. rs6450176 (5:54002195) (A/G) - no LD proxy mQTL available
+
+16. rs731839 (19:33408159) (A/G) - no LD proxy mQTL available
+
+17. rs7978610 (12:123984025) (C/G) - no LD proxy mQTL available
+
+**18. rs998584 (6:43790159) (A/C) - mQTL data available: rs998584 (chr6:43757896) with R2 1 and distance 0bps, with alleles (C/A)**
+
+
+# LD Proxy Solution
+
+We instrument adiponectin with 
+
+* SNP_1 - rs11023332, chr11:14784110
+* SNP_2 - rs1108842, chr3:52720080
+* SNP_3 - rs12051272, chr16:82663288
+* SNP_4 - rs222852, chr17:7171356 - LD proxy with R2 0.8653
+* SNP_5 - rs998584, chr6:43757896
+
+```{r}
+exposure_dat <- exposure_dat %>% 
+  filter(SNP %in% c("rs11023332", "rs1108842", "rs12051272", 
+                    "rs222852", 'rs998584')) %>% 
+  mutate(rsid = SNP) %>% 
+  mutate(SNP = case_when(
+    SNP == 'rs11023332' ~ 'SNP_1',
+    SNP == 'rs1108842' ~ 'SNP_2',
+    SNP == 'rs12051272' ~ 'SNP_3',
+    SNP == 'rs222852' ~ 'SNP_4',
+    SNP == 'rs998584' ~ 'SNP_5'))
+
+str(exposure_dat)
+```
+
+```{r}
+str(ld_qtls)
+
+outcome_dat <- ld_qtls %>% 
+  filter(snp %in% c('chr11:14784110', 'chr3:52720080',
+                    'chr16:82663288', 'chr17:7171356',
+                    'chr6:43757896')) %>% 
+  mutate(SNP = case_when(
+    snp == 'chr11:14784110' ~ 'SNP_1',
+    snp == 'chr3:52720080' ~ 'SNP_2',
+    snp == 'chr16:82663288' ~ 'SNP_3',
+    snp == 'chr17:7171356' ~ 'SNP_4',
+    snp == 'chr6:43757896' ~ 'SNP_5'))
+
+str(outcome_dat)
+```
+
+
+```{r}
+outcome_dat <- outcome_dat %>% 
+    dplyr::select(SNP,
+                  beta.outcome = Effect,
+                  se.outcome = StdErr,
+                  samplesize.outcome = TotalSampleSize,
+                  pval.outcome = Pvalue,
+                  eaf.outcome = Freq1, 
+                  effect_allele.outcome = Allele1,
+                  other_allele.outcome = Allele2,
+                  outcome = cpg, 
+                  id.outcome = cpg) %>% 
+    mutate(effect_allele.outcome = toupper(effect_allele.outcome),
+           other_allele.outcome = toupper(other_allele.outcome))
+
+str(outcome_dat)
+```
+
+
+***
+
+Save only CpGs of interest
+
+```{r}
+outcome_dat <- outcome_dat %>% filter(outcome %in% cpg_list)
+
+str(outcome_dat)
+```
+
+Harmonise
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat, outcome_dat, action=1)
+
+dat
+```
+
+# SMR
+
+```{r}
+res_ivw <- mr(dat, method = c('mr_ivw'))
+
+# Adjust p-values
+res_ivw$padj <- p.adjust(res_ivw$pval, method = 'fdr')
+print(res_ivw %>% arrange(padj))
+```
+
+Save
+
+
+```{r}
+save(res_ivw, dat, file='../Adi_Data/Adi_to_DNAm.Rdata')
+write_csv(res_ivw, file='../Adi_Data/Tables/ST12.csv')
+```
+
+
+
+
