@@ -1,0 +1,592 @@
+---
+title: "Adipokine EWAS - Script 8: Save Full Results"
+author: "Lucy Sinke"
+output: html_document
+---
+
+```{r echo=FALSE}
+rm(list=ls())
+```
+
+***
+
+# Setup
+
+Load packages
+
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+```
+
+***
+
+# Meta-Analysis Results
+
+Create function
+
+```{r}
+load_meta <- function(folder){
+  results <- read_tsv(
+    file=paste0("../Adi_Data/Processing/Meta_Output/",
+                folder,
+                "/METAANALYSIS1.TBL"))
+  
+  results <- results %>% 
+    mutate(
+      pFDR = p.adjust(
+        `P-value`,
+        method="fdr"),
+      pBonf = p.adjust(
+        `P-value`, 
+        method="bonf")) %>% 
+    dplyr::select(
+      MarkerName, 
+      Effect,
+      StdErr,
+      `P-value`,
+      pFDR,
+      pBonf,
+      Direction,
+      HetISq,
+      HetPVal)
+  
+  return(results)
+}
+```
+
+Base model
+
+```{r}
+results <- load_meta(
+  folder="Adi_Base")
+
+colnames(results) <- c(
+  "cpg", "base_meta_beta", "base_meta_se",
+  "base_meta_p", "base_meta_padj_fdr", "base_meta_padj_bonf",
+  "base_het_dir", "base_het_i2", "base_het_p"
+)
+
+adi_results <- results
+```
+
+Smoking sensitivity analysis
+
+```{r}
+results <- load_meta(
+  folder="Adi_Smoke")
+
+colnames(results) <- c(
+  "cpg", "ext1_meta_beta", "ext1_meta_se",
+  "ext1_meta_p", "ext1_meta_padj_fdr", "ext1_meta_padj_bonf",
+  "ext1_het_dir", "ext1_het_i2", "ext1_het_p"
+)
+
+adi_results <- full_join(adi_results, results)
+```
+
+BMI sensitivity analysis
+
+```{r}
+results <- load_meta(
+  folder="Adi_BMI")
+
+colnames(results) <- c(
+  "cpg", "ext2_meta_beta", "ext2_meta_se",
+  "ext2_meta_p", "ext2_meta_padj_fdr", "ext2_meta_padj_bonf",
+  "ext2_het_dir", "ext2_het_i2", "ext2_het_p"
+)
+
+adi_results <- full_join(adi_results, results)
+```
+
+Epidish sensitivity analysis
+
+```{r}
+results <- load_meta(
+  folder="Adi_Epidish")
+
+colnames(results) <- c(
+  "cpg", "ext3_meta_beta", "ext3_meta_se",
+  "ext3_meta_p", "ext3_meta_padj_fdr", "ext3_meta_padj_bonf",
+  "ext3_het_dir", "ext3_het_i2", "ext3_het_p"
+)
+
+adi_results <- full_join(adi_results, results)
+```
+
+
+Inspect output
+
+```{r}
+str(adi_results)
+```
+
+***
+
+# Cohort Specific Results
+
+Create function
+
+```{r}
+read_cohort <- function(cohort, model){
+  results <- read_tsv(
+    file=paste0("../Adi_Data/Processing/Meta_Input/OUT_adi_",
+                model,
+                "-",
+                toupper(cohort),
+                ".tsv"))
+  
+  results <- results %>% 
+    mutate(
+      pFDR = p.adjust(p, method="bonf"),
+      pBonf = p.adjust(p, method="fdr")
+    ) %>% 
+    dplyr::select(
+      cpg,
+      N,
+      beta,
+      se,
+      p,
+      pFDR,
+      pBonf)
+  
+  return(results)
+}
+```
+
+***
+
+### LLS
+
+Base model
+
+```{r}
+results <- read_cohort("lls", "base")
+
+colnames(results) <- c(
+  "cpg", "base_N_LLS", "base_beta_LLS", "base_SE_LLS",
+  "base_p_LLS", "base_padj_fdr_LLS", "base_padj_bonf_LLS")
+
+adi_results <- left_join(adi_results, results)
+```
+
+Smoking sensitivity analysis
+
+```{r}
+results <- read_cohort("lls", "ext1")
+
+colnames(results) <- c(
+  "cpg", "ext1_N_LLS", "ext1_beta_LLS", "ext1_SE_LLS",
+  "ext1_p_LLS", "ext1_padj_fdr_LLS", "ext1_padj_bonf_LLS")
+
+adi_results <- left_join(adi_results, results)
+```
+
+BMI sensitivity analysis
+
+```{r}
+results <- read_cohort("lls", "ext2")
+
+colnames(results) <- c(
+  "cpg", "ext2_N_LLS", "ext2_beta_LLS", "ext2_SE_LLS",
+  "ext2_p_LLS", "ext2_padj_fdr_LLS", "ext2_padj_bonf_LLS")
+
+adi_results <- left_join(adi_results, results)
+```
+
+BMI sensitivity analysis
+
+```{r}
+results <- read_cohort("lls", "ext3")
+
+colnames(results) <- c(
+  "cpg", "ext3_N_LLS", "ext3_beta_LLS", "ext3_SE_LLS",
+  "ext3_p_LLS", "ext3_padj_fdr_LLS", "ext3_padj_bonf_LLS")
+
+adi_results <- left_join(adi_results, results)
+```
+
+
+***
+
+### KORA
+
+Base model
+
+```{r}
+results <- read_cohort("kora", "base")
+
+colnames(results) <- c(
+  "cpg", "base_N_KORA", "base_beta_KORA", "base_SE_KORA",
+  "base_p_KORA", "base_padj_fdr_KORA", "base_padj_bonf_KORA")
+
+adi_results <- left_join(adi_results, results)
+```
+
+Smoking sensitivity analysis
+
+```{r}
+results <- read_cohort("kora", "ext1")
+
+colnames(results) <- c(
+  "cpg", "ext1_N_KORA", "ext1_beta_KORA", "ext1_SE_KORA",
+  "ext1_p_KORA", "ext1_padj_fdr_KORA", "ext1_padj_bonf_KORA")
+
+adi_results <- left_join(adi_results, results)
+```
+
+BMI sensitivity analysis
+
+```{r}
+results <- read_cohort("kora", "ext2")
+
+colnames(results) <- c(
+  "cpg", "ext2_N_KORA", "ext2_beta_KORA", "ext2_SE_KORA",
+  "ext2_p_KORA", "ext2_padj_fdr_KORA", "ext2_padj_bonf_KORA")
+
+adi_results <- left_join(adi_results, results)
+```
+
+BMI sensitivity analysis
+
+```{r}
+results <- read_cohort("kora", "ext3")
+
+colnames(results) <- c(
+  "cpg", "ext3_N_KORA", "ext3_beta_KORA", "ext3_SE_KORA",
+  "ext3_p_KORA", "ext3_padj_fdr_KORA", "ext3_padj_bonf_KORA")
+
+adi_results <- left_join(adi_results, results)
+```
+
+
+***
+
+### LL Deep
+
+Base model
+
+```{r}
+results <- read_cohort("lld", "base")
+
+colnames(results) <- c(
+  "cpg", "base_N_LLD", "base_beta_LLD", "base_SE_LLD",
+  "base_p_LLD", "base_padj_fdr_LLD", "base_padj_bonf_LLD")
+
+adi_results <- left_join(adi_results, results)
+```
+
+Smoking sensitivity analysis
+
+```{r}
+results <- read_cohort("lld", "ext1")
+
+colnames(results) <- c(
+  "cpg", "ext1_N_LLD", "ext1_beta_LLD", "ext1_SE_LLD",
+  "ext1_p_LLD", "ext1_padj_fdr_LLD", "ext1_padj_bonf_LLD")
+
+adi_results <- left_join(adi_results, results)
+```
+
+BMI sensitivity analysis
+
+```{r}
+results <- read_cohort("lld", "ext2")
+
+colnames(results) <- c(
+  "cpg", "ext2_N_LLD", "ext2_beta_LLD", "ext2_SE_LLD",
+  "ext2_p_LLD", "ext2_padj_fdr_LLD", "ext2_padj_bonf_LLD")
+
+adi_results <- left_join(adi_results, results)
+```
+
+Epidish sensitivity analysis
+
+```{r}
+results <- read_cohort("lld", "ext3")
+
+colnames(results) <- c(
+  "cpg", "ext3_N_LLD", "ext3_beta_LLD", "ext3_SE_LLD",
+  "ext3_p_LLD", "ext3_padj_fdr_LLD", "ext3_padj_bonf_LLD")
+
+adi_results <- left_join(adi_results, results)
+```
+
+***
+
+### SHIP
+
+Base model
+
+```{r}
+results <- read_cohort("ship", "base")
+
+colnames(results) <- c(
+  "cpg", "base_N_SHIP", "base_beta_SHIP", "base_SE_SHIP",
+  "base_p_SHIP", "base_padj_fdr_SHIP", "base_padj_bonf_SHIP")
+
+adi_results <- left_join(adi_results, results)
+```
+
+Smoking sensitivity analysis
+
+```{r}
+results <- read_cohort("ship", "ext1")
+
+colnames(results) <- c(
+  "cpg", "ext1_N_SHIP", "ext1_beta_SHIP", "ext1_SE_SHIP",
+  "ext1_p_SHIP", "ext1_padj_fdr_SHIP", "ext1_padj_bonf_SHIP")
+
+adi_results <- left_join(adi_results, results)
+```
+
+BMI sensitivity analysis
+
+```{r}
+results <- read_cohort("ship", "ext2")
+
+colnames(results) <- c(
+  "cpg", "ext2_N_SHIP", "ext2_beta_SHIP", "ext2_SE_SHIP",
+  "ext2_p_SHIP", "ext2_padj_fdr_SHIP", "ext2_padj_bonf_SHIP")
+
+adi_results <- left_join(adi_results, results)
+```
+
+Epidish sensitivity analysis
+
+```{r}
+results <- read_cohort("ship", "ext3")
+
+colnames(results) <- c(
+  "cpg", "ext3_N_SHIP", "ext3_beta_SHIP", "ext3_SE_SHIP",
+  "ext3_p_SHIP", "ext3_padj_fdr_SHIP", "ext3_padj_bonf_SHIP")
+
+adi_results <- left_join(adi_results, results)
+```
+
+
+***
+
+### TwinsUK
+
+Base model
+
+```{r}
+results <- read_cohort("tuk", "base")
+
+colnames(results) <- c(
+  "cpg", "base_N_TUK", "base_beta_TUK", "base_SE_TUK",
+  "base_p_TUK", "base_padj_fdr_TUK", "base_padj_bonf_TUK")
+
+adi_results <- left_join(adi_results, results)
+```
+
+Smoking sensitivity analysis
+
+```{r}
+results <- read_cohort("tuk", "ext1")
+
+colnames(results) <- c(
+  "cpg", "ext1_N_TUK", "ext1_beta_TUK", "ext1_SE_TUK",
+  "ext1_p_TUK", "ext1_padj_fdr_TUK", "ext1_padj_bonf_TUK")
+
+adi_results <- left_join(adi_results, results)
+```
+
+BMI sensitivity analysis
+
+```{r}
+results <- read_cohort("tuk", "ext2")
+
+colnames(results) <- c(
+  "cpg", "ext2_N_TUK", "ext2_beta_TUK", "ext2_SE_TUK",
+  "ext2_p_TUK", "ext2_padj_fdr_TUK", "ext2_padj_bonf_TUK")
+
+adi_results <- left_join(adi_results, results)
+```
+
+
+***
+
+### GOLDN
+
+Base model
+
+```{r}
+results <- read_cohort("goldn", "base")
+
+colnames(results) <- c(
+  "cpg", "base_N_GOLDN", "base_beta_GOLDN", "base_SE_GOLDN",
+  "base_p_GOLDN", "base_padj_fdr_GOLDN", "base_padj_bonf_GOLDN")
+
+adi_results <- left_join(adi_results, results)
+```
+
+Smoking sensitivity analysis
+
+```{r}
+results <- read_cohort("goldn", "ext1")
+
+colnames(results) <- c(
+  "cpg", "ext1_N_GOLDN", "ext1_beta_GOLDN", "ext1_SE_GOLDN",
+  "ext1_p_GOLDN", "ext1_padj_fdr_GOLDN", "ext1_padj_bonf_GOLDN")
+
+adi_results <- left_join(adi_results, results)
+```
+
+BMI sensitivity analysis
+
+```{r}
+results <- read_cohort("goldn", "ext2")
+
+colnames(results) <- c(
+  "cpg", "ext2_N_GOLDN", "ext2_beta_GOLDN", "ext2_SE_GOLDN",
+  "ext2_p_GOLDN", "ext2_padj_fdr_GOLDN", "ext2_padj_bonf_GOLDN")
+
+adi_results <- left_join(adi_results, results)
+```
+
+***
+
+# Methylation Statistics
+
+Load data
+
+```{r}
+load("../Adi_Data/Cohort_Results/ALL_ln-adi_base.Rdata")
+
+limma_base <- limma_base %>% 
+  dplyr::select(
+    cpg, 
+    starts_with("cpg_mean"),
+    starts_with("cpg_sd")
+  )
+
+adi_results <- left_join(
+  adi_results, limma_base,
+  by="cpg"
+)
+```
+
+***
+
+# Annotation
+
+***
+
+### Variables of Interest
+
+`manifest_hg19` (fetched on 4/4/2023 from https://zwdzwd.github.io/InfiniumAnnotation)
+
+* `probeID` as `cpg` - CpG ID
+* `CpG_chrm` as `cpg_chr_hg19` - chromosome (hg19)
+* `CpG_beg` as `cpg_start_hg19` - CpG start position (hg19)
+* `CpG_end` as `cpg_end_hg19` - CpG end position (hg19)
+* `probe_strand` as `cpg_strand` - strand
+* `gene_HGNC`
+
+```{r}
+manifest_hg19 <- read_tsv(
+  "../Shared_Data/Manifests/HM450.hg19.manifest.tsv.gz")
+
+anno <- manifest_hg19 %>% 
+  dplyr::select(
+    cpg = probeID,
+    cpg_chr_hg19 = CpG_chrm,
+    cpg_start_hg19 = CpG_beg,
+    cpg_end_hg19 = CpG_end,
+    cpg_strand = probe_strand,
+    gene_HGNC
+  ) %>% 
+  mutate(
+    cpg_chr_hg19 = substr(cpg_chr_hg19,4,5)
+  )
+
+anno <- anno %>% 
+  dplyr::filter(cpg %in% adi_results$cpg)
+```
+
+***
+
+`manifest_hg38` (fetched on 4/4/2023 from https://zwdzwd.github.io/InfiniumAnnotation)
+
+* `Probe_ID` as `cpg` - CpG ID
+* `CpG_chrm` as `cpg_chr_hg38` - chromosome (hg38)
+* `CpG_beg` as `cpg_start_hg38` - CpG start position (hg38)
+* `CpG_end` as `cpg_end_hg38` - CpG end position (hg38)
+
+```{r}
+manifest_hg38 <- read_tsv(
+  "../Shared_Data/Manifests/HM450.hg38.manifest.tsv.gz"
+)
+
+manifest_hg38 <- manifest_hg38 %>% 
+  dplyr::select(
+    cpg = Probe_ID,
+    cpg_chr_hg38 = CpG_chrm,
+    cpg_start_hg38 = CpG_beg,
+    cpg_end_hg38 = CpG_end
+  ) %>% 
+  mutate(
+    cpg_chr_hg38 = substr(cpg_chr_hg38,4,5)
+  )
+
+anno <- left_join(
+  anno, manifest_hg38,
+  by="cpg"
+)
+```
+
+***
+
+`manifest_roadmap` (fetched on 4/4/2023 from https://zwdzwd.github.io/InfiniumAnnotation)
+
+* `probeID` as `cpg` - CpG ID
+* `E062` - ROADMAP PBMC chromatin state annotation
+
+```{r}
+manifest_roadmap <- read_tsv(
+  "../Shared_Data/Manifests/HM450.hg19.REMC.chromHMM.tsv.gz"
+)
+
+manifest_roadmap <- manifest_roadmap %>% 
+  dplyr::select(
+    cpg = probeID,
+    E062
+  )
+
+anno <- left_join(
+  anno, manifest_roadmap,
+  by="cpg"
+)
+
+adi_results <- left_join(
+  adi_results, anno
+)
+```
+
+***
+
+# Heterogeneity
+
+Look at heterogenous CpGs
+
+```{r}
+het <- adi_results %>% filter(base_het_i2 > 90)
+het_sig <- het %>% filter(base_meta_padj_fdr <= 0.05)
+print(paste0('There are ', nrow(het), ' heterogenous CpGs that will be removed, and ', nrow(het_sig), ' of these were significant...'))
+```
+
+***
+
+# Saving
+
+Full results
+
+```{r}
+save(adi_results, 
+     file="../Adi_Data/Results/Adi_EWAS_Results-Full.Rdata")
+```
+
+***
+

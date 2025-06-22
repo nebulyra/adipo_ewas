@@ -1,0 +1,2631 @@
+---
+title: "Adipokine EWAS - Script 4: EWAS QC & Data Processing"
+author: "Lucy Sinke"
+output: html_document
+---
+
+```{r echo=FALSE}
+rm(list=ls())
+```
+
+
+```{r, setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/exports/molepi/users/ljsinke/LLS/Adi_Scripts")
+```
+
+***
+
+# Setup
+
+Load packages
+
+```{r message=FALSE}
+library(ggpubr)
+library(DNAmArray)
+library(lattice)
+library(ggrepel)
+library(tidyverse)
+```
+
+***
+
+### Load probe annotation
+
+We use Zhou manifests, which were pulled recently (4/4/2023) from Zhou's github: https://zwdzwd.github.io/InfiniumAnnotation
+
+For 450K data:
+
+```{r warning=FALSE, message = FALSE}
+anno <- read_tsv("../Shared_Data/Manifests/HM450.hg19.manifest.tsv.gz")
+
+anno <- anno %>% 
+  dplyr::select(
+    cpg = probeID,
+    chr = CpG_chrm,
+    start = CpG_beg,
+    MASK_general)
+```
+
+For EPIC data:
+
+```{r}
+anno_EPIC <- read_tsv("../Shared_Data/Manifests/EPIC.hg19.manifest.tsv.gz")
+
+anno_EPIC <- anno_EPIC %>% 
+  dplyr::select(
+    cpg = probeID,
+    chr = CpG_chrm,
+    start = CpG_beg,
+    MASK_general
+  )
+```
+
+***
+
+Save probes suggested for general purpose masking
+
+```{r}
+maskProbes <- anno[anno$MASK_general == TRUE,]$cpg
+print(paste0(
+  "We will mask ",
+  length(maskProbes),
+  " CpGs from the 450k data..."))
+
+maskProbes_EPIC <- anno_EPIC[anno_EPIC$MASK_general == TRUE,]$cpg
+print(paste0(
+  "We will mask ",
+  length(maskProbes_EPIC),
+  " CpGs from the EPIC data..."))
+```
+
+***
+
+Save autosomal probes
+
+```{r}
+autoProbes <- anno[anno$chr %in% paste0("chr", 1:22),]$cpg
+print(paste0(
+  "There are ",
+  length(autoProbes),
+  " autosomal CpGs on the 450k array..."))
+
+autoProbes_EPIC <- anno_EPIC[anno_EPIC$chr %in% paste0("chr", 1:22),]$cpg
+print(paste0(
+  "There are ",
+  length(autoProbes_EPIC),
+  " autosomal CpGs on the EPIC array..."))
+```
+
+
+Load ENCODE Blacklist region probes
+
+```{r}
+load(
+    "/exports/molepi/users/ljsinke/LLS/Shared_Data/ENCODE_Blacklist/ENCODEBlacklist_CpGomit-EPIC.RData")
+cpg_blacklist_EPIC <- cpg_blacklist
+
+load(
+    "/exports/molepi/users/ljsinke/LLS/Shared_Data/ENCODE_Blacklist/ENCODEBlacklist_CpGomit-450K.RData")
+```
+
+***
+
+# Adiponectin EWAS - Base Model
+
+***
+
+### Load data
+
+This contains data on:
+
+* `cpg` - probe ID
+* `beta_` - effect size reported by each cohort
+* `SE_` - standard error reported by each cohort
+* `p_`- unadjusted p-value reported by each cohort
+* `N_` - sample size of each cohort
+
+```{r}
+load("../Adi_Data/Cohort_Results/ALL_ln-adi_base.Rdata")
+limma_base[1:5, 1:5]
+```
+
+Ensure all variables are numeric
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_lls = as.numeric(beta_lls),
+    beta_kora = as.numeric(beta_kora),
+    beta_tuk = as.numeric(beta_tuk),
+    beta_lld = as.numeric(beta_lld),
+    beta_ship = as.numeric(beta_ship),
+    beta_goldn = as.numeric(beta_goldn),
+    SE_lls = as.numeric(SE_lls),
+    SE_kora = as.numeric(SE_kora),
+    SE_tuk = as.numeric(SE_tuk),
+    SE_lld = as.numeric(SE_lld),
+    SE_ship = as.numeric(SE_ship),
+    SE_goldn = as.numeric(SE_goldn),
+    p_lls = as.numeric(p_lls),
+    p_kora = as.numeric(p_kora),
+    p_tuk = as.numeric(p_tuk),
+    p_lld = as.numeric(p_lld),
+    p_ship = as.numeric(p_ship),
+    p_goldn = as.numeric(p_goldn),
+    N_lls = as.numeric(N_lls),
+    N_kora = as.numeric(N_kora),
+    N_tuk = as.numeric(N_tuk),
+    N_lld = as.numeric(N_lld),
+    N_ship = as.numeric(N_ship),
+    N_goldn = as.numeric(N_goldn)
+  )
+```
+
+***
+
+### Outlier Removal
+
+Outliers are defined as:
+
+* NA values for beta or SE
+* Based on less than 50 observations
+
+Create function
+
+```{r}
+outlier_removal <- function(cohort) {
+  print("------------------------------------------------------------")
+  
+  print(paste0("Looking at ", toupper(cohort), "..."))
+  
+  assign(paste0("df_",cohort), limma_base %>% 
+    dplyr::select(
+      cpg,
+      beta = paste0("beta_", cohort),
+      se = paste0("SE_", cohort),
+      p = paste0("p_", cohort),
+      N = paste0("N_", cohort)
+    ) %>% 
+    mutate(
+      beta = as.numeric(beta),
+      se = as.numeric(se),
+      p = as.numeric(p),
+      N = as.numeric(N)
+    ) %>% 
+    filter(
+      N > 50 & !is.na(beta) & !is.na(se) & se < 10
+    ), envir=.GlobalEnv)
+  
+  print(paste0("After removing outliers, we have data on ",
+               nrow(get(paste0("df_", cohort))), " CpGs"))
+  
+  print("------------------------------------------------------------")
+  
+}
+```
+
+***
+
+LLS
+
+```{r}
+outlier_removal("lls")
+dim(df_lls)
+print(head(df_lls) %>% arrange(p))
+```
+
+***
+
+KORA
+
+```{r}
+outlier_removal("kora")
+dim(df_kora)
+print(head(df_kora) %>% arrange(p))
+```
+
+***
+
+TwinsUK
+
+```{r}
+outlier_removal("tuk")
+dim(df_tuk)
+print(head(df_tuk) %>% arrange(p))
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+outlier_removal("lld")
+dim(df_lld)
+print(head(df_lld) %>% arrange(p))
+```
+
+***
+
+SHIP
+
+```{r}
+outlier_removal("ship")
+dim(df_ship)
+print(head(df_ship) %>% arrange(p))
+```
+
+***
+
+GOLDN
+
+```{r}
+outlier_removal("goldn")
+dim(df_goldn)
+print(head(df_goldn) %>% arrange(p))
+```
+
+***
+
+### Probe Removal
+
+Create function
+
+```{r}
+probe_removal <- function(cohort){
+      print("------------------------------------------------------------")
+  
+      print(paste0("Looking at ", toupper(cohort), "..."))
+  
+      print("------------------------------------------------------------")
+  if(cohort=="ship"){
+    print(paste0(nrow(get(paste0("df_", cohort)) %>% 
+              filter(!cpg %in% autoProbes_EPIC)), 
+               " sex chromosomal probes from the ", toupper(cohort), 
+               " data will be removed..."))
+  
+      print(paste0(nrow(get(paste0("df_", cohort)) %>% 
+                      filter(cpg %in% cpg_blacklist_EPIC)), 
+               " ENCODE Blacklist region probes in the ", toupper(cohort), 
+               " data will be removed..."))
+  
+      print(paste0(nrow(get(paste0("df_", cohort)) %>% 
+                      filter(cpg %in% maskProbes_EPIC)), 
+               " probes suggested for general purpose masking in the ", toupper(cohort), 
+               " data will be removed..."))
+  
+      assign(paste0("df_", cohort), left_join(get(paste0("df_", cohort)),
+                                          anno_EPIC, by = "cpg") %>% 
+           filter(cpg %in% autoProbes_EPIC &
+                    !cpg %in% cpg_blacklist_EPIC &
+                    !cpg %in% maskProbes_EPIC
+                    ) %>% 
+           mutate(
+             chr = as.numeric(substr(chr, 4, 5))
+           ) %>% 
+           dplyr::select(-MASK_general), envir=.GlobalEnv) 
+  } else {
+      print(paste0(nrow(get(paste0("df_", cohort)) %>% 
+              filter(!cpg %in% autoProbes)), 
+               " sex chromosomal probes from the ", toupper(cohort), 
+               " data will be removed..."))
+  
+      print(paste0(nrow(get(paste0("df_", cohort)) %>% 
+                      filter(cpg %in% cpg_blacklist)), 
+               " ENCODE Blacklist region probes in the ", toupper(cohort), 
+               " data will be removed..."))
+  
+      print(paste0(nrow(get(paste0("df_", cohort)) %>% 
+                      filter(cpg %in% maskProbes)), 
+               " probes suggested for general purpose masking in the ", toupper(cohort), 
+               " data will be removed..."))
+  
+      assign(paste0("df_", cohort), left_join(get(paste0("df_", cohort)),
+                                          anno, by = "cpg") %>% 
+           filter(cpg %in% autoProbes &
+                    !cpg %in% cpg_blacklist &
+                    !cpg %in% maskProbes
+                    ) %>% 
+           mutate(
+             chr = as.numeric(substr(chr, 4, 5))
+           ) %>% 
+           dplyr::select(-MASK_general), envir=.GlobalEnv) 
+    }
+  
+  print("------------------------------------------------------------")
+  
+  print(paste0("The remaining data from ", toupper(cohort), 
+               " contains information on ",
+               nrow(get(paste0("df_", cohort))), " CpGs..."))
+  
+  print("------------------------------------------------------------")
+}
+```
+
+***
+
+LLS
+
+```{r}
+probe_removal("lls")
+dim(df_lls)
+
+cpgs_lls <- df_lls$cpg
+```
+
+***
+
+KORA
+
+```{r}
+probe_removal("kora")
+dim(df_kora)
+
+cpgs_kora <- df_kora$cpg
+```
+
+***
+
+TwinsUK
+
+```{r}
+probe_removal("tuk")
+dim(df_tuk)
+
+cpgs_tuk <- df_tuk$cpg
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+probe_removal("lld")
+dim(df_lld)
+
+cpgs_lld <- df_lld$cpg
+```
+
+***
+
+SHIP
+
+```{r}
+probe_removal("ship")
+dim(df_ship)
+
+cpgs_ship <- df_ship$cpg
+```
+
+***
+
+GOLDN
+
+```{r}
+probe_removal("goldn")
+dim(df_goldn)
+
+cpgs_goldn <- df_goldn$cpg
+```
+
+***
+
+ALL
+
+```{r}
+all_cpgs <- unique(c(df_lls$cpg, df_kora$cpg, df_tuk$cpg, df_lld$cpg))
+print(paste0("In the main 5 cohorts, we have data on ", 
+             length(all_cpgs), " CpGs from the 450K array..."))
+```
+
+Remove rows based on observations under 50
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_lls = ifelse(N_lls < 50 | !cpg %in% cpgs_lls, NA, beta_lls),
+    beta_kora = ifelse(N_kora < 50 | !cpg %in% cpgs_kora, NA, beta_kora),
+    beta_tuk = ifelse(N_tuk < 50 | !cpg %in% cpgs_tuk, NA, beta_tuk),
+    beta_lld = ifelse(N_lld < 50 | !cpg %in% cpgs_lld, NA, beta_lld),
+    beta_ship = ifelse(N_ship < 50 | !cpg %in% cpgs_ship, NA, beta_ship),
+    beta_goldn = ifelse(N_goldn < 50 | !cpg %in% cpgs_goldn, NA, beta_goldn),
+    SE_lls = ifelse(N_lls < 50 | !cpg %in% cpgs_lls, NA, SE_lls),
+    SE_kora = ifelse(N_kora < 50 | !cpg %in% cpgs_kora, NA, SE_kora),
+    SE_tuk = ifelse(N_tuk < 50 | !cpg %in% cpgs_tuk, NA, SE_tuk),
+    SE_lld = ifelse(N_lld < 50 | !cpg %in% cpgs_lld, NA, SE_lld),
+    SE_ship = ifelse(N_ship < 50 | !cpg %in% cpgs_ship, NA, SE_ship),
+    SE_goldn = ifelse(N_goldn < 50 | !cpg %in% cpgs_goldn, NA, SE_goldn)
+  ) %>% 
+  filter(cpg %in% all_cpgs)
+```
+
+***
+
+### Save ALL
+
+```{r}
+save(limma_base, 
+     file="../Adi_Data/Processing/ALL-2-PRUNE_ln-adi_base.Rdata")
+```
+
+***
+
+## Quality Control Plots
+
+For all cohorts, we want to plot:
+
+* QQ plots side by side
+* Volcano plots side by side
+* Manhattan plots side by side
+* Boxplots of effect sizes
+* Boxplots of SEs
+
+***
+
+### QQ plots 
+
+Create function
+
+```{r}
+draw_qq <- function(cohort){
+  n <- nrow(get(paste0("df_",cohort)))
+  exp_p <- -log10((rank(get(paste0("df_", cohort))$p,
+                        ties.method="first") - 0.5) / n)
+  obs_p <- -log10(get(paste0("df_", cohort))$p)
+  df <- data.frame(
+    e=exp_p,
+    o=obs_p
+  )
+  
+  assign(paste0("plot_", cohort), 
+         df %>% 
+            ggplot() +
+            geom_abline(
+              aes(
+                intercept=0, 
+                slope=1), 
+              color="#D62839") +
+           geom_point(
+             aes(
+               x=e, 
+               y=o), 
+             alpha=0.5, 
+             size=1, 
+             color="#1B2021") +
+           ylim(0,NA) + 
+           xlim(0,NA) +
+           ggtitle(toupper(cohort)) +
+           xlab("Expected") +
+           ylab("Observed") +
+  theme(
+    axis.text = element_text(
+       size=9, 
+       color="#1B2021"),
+    axis.title = element_text(
+      size=11, 
+      hjust=0.5, 
+      color="#1B2021"),
+    plot.title = element_text(
+      size=16, 
+      hjust=0.5,
+      face="bold", 
+      color = "#548687"),
+    panel.background = element_rect(
+      fill="white"),
+    panel.border = element_rect(
+      color="#1B2021",
+      fill=NA),
+    panel.grid.major = element_line(
+      color="grey95"),
+    panel.grid.minor = element_line(
+      color="grey95"),
+    plot.background = element_rect(
+      fill="white")),
+  envir = .GlobalEnv)
+}
+```
+
+***
+
+LLS
+
+```{r}
+draw_qq("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_qq("kora")
+```
+
+***
+
+TwinsUK
+
+```{r}
+draw_qq("tuk")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_qq("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_qq("ship")
+```
+
+***
+
+GOLDN
+
+```{r}
+draw_qq("goldn")
+```
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(plot_lls, 
+          plot_kora, 
+          plot_tuk,
+          plot_lld,
+          plot_ship,
+          plot_goldn,
+          ncol = 3, nrow = 2)
+```
+
+***
+
+### Volcano Plots
+
+***
+
+Make scale
+
+```{r}
+min <- as.numeric(-max(c(
+  abs(limma_base$beta_lls), 
+  abs(limma_base$beta_kora),
+  abs(limma_base$beta_tuk),
+  abs(limma_base$beta_lld),
+  abs(limma_base$beta_ship),
+  abs(limma_base$beta_goldn)),
+  na.rm=TRUE) - 0.005)
+
+max <- as.numeric(max(c(
+  abs(limma_base$beta_lls), 
+  abs(limma_base$beta_kora),
+  abs(limma_base$beta_tuk),
+  abs(limma_base$beta_lld),
+  abs(limma_base$beta_ship),
+  abs(limma_base$beta_goldn)),
+  na.rm=TRUE) + 0.005)
+
+p_max <- as.numeric(-log10(min(c(
+  limma_base$p_lls,
+  limma_base$p_kora,
+  limma_base$p_tuk,
+  limma_base$p_lld,
+  limma_base$p_ship,
+  limma_base$p_goldn),
+  na.rm=TRUE))) + 2
+```
+
+Create function
+
+```{r}
+draw_volcano <- function(cohort){
+  sig_df <- get(paste0("df_", cohort)) %>% 
+    mutate(
+      padj = p.adjust(p, method="fdr")
+    ) %>% 
+    filter(
+      padj <= 0.05
+    )
+  
+  if(nrow(sig_df) >= 1){
+    sig_limit <- max(sig_df$p)
+  } else {
+    sig_limit <- 10E-07
+  }
+  
+  assign(paste0("plot_", cohort), 
+         get(paste0('df_', cohort)) %>% 
+           ggplot(aes(
+             x = beta,
+             y = -log10(p)
+           )) +
+           geom_hline(
+             yintercept = -log10(sig_limit),
+             linetype = "dashed",
+             size = 0.5,
+             color = "#ACAFAF"
+           ) +
+           geom_vline(
+             xintercept = -0.05,
+             linetype = "dashed",
+             size = 0.5,
+             color = "#ACAFAF"
+           ) +
+           geom_vline(
+             xintercept = 0.05,
+             linetype = "dashed",
+             size = 0.5,
+             color = "#ACAFAF"
+           ) +
+         geom_point(
+           color = ifelse(get(paste0('df_', cohort))$p <= sig_limit, 
+                          "#D62839", "#ACAFAF"),
+           size = 0.8, 
+         ) +
+           xlim(min, max) +
+           ylim(0, p_max) +
+           ggtitle(toupper(cohort)) +
+           ylab(bquote(-log[10]~"p")) +
+           xlab("Effect Size") +
+  theme(
+    axis.text = element_text(
+       size=9, 
+       color="#1B2021"),
+    axis.title = element_text(
+      size=11, 
+      hjust=0.5, 
+      color="#1B2021"),
+    plot.title = element_text(
+      size=16, 
+      hjust=0.5,
+      face="bold", 
+      color = "#548687"),
+    panel.background = element_rect(
+      fill="white"),
+    panel.border = element_rect(
+      color="#1B2021",
+      fill=NA),
+    panel.grid.major = element_line(
+      color="grey95"),
+    panel.grid.minor = element_line(
+      color="grey95"),
+    plot.background = element_rect(
+      fill="white")),
+  envir = .GlobalEnv)
+}
+```
+
+***
+
+LLS
+
+```{r}
+draw_volcano("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_volcano("kora")
+```
+
+***
+
+TwinsUK
+
+```{r}
+draw_volcano("tuk")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_volcano("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_volcano("ship")
+```
+
+***
+
+GOLDN
+
+```{r}
+draw_volcano("goldn")
+```
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(
+  plot_lls, 
+  plot_kora, 
+  plot_tuk,
+  plot_lld,
+  plot_ship,
+  plot_goldn,
+  ncol = 3, nrow = 2)
+```
+
+***
+
+### Manhattan plots
+
+***
+
+Create function
+
+```{r}
+draw_man <- function(cohort){
+  # Get sig limit
+  sig_df <- get(paste0("df_", cohort)) %>% 
+    mutate(
+      padj = p.adjust(p, method="fdr")
+    ) %>% 
+    filter(
+      padj <= 0.05
+    )
+  
+  if(nrow(sig_df) >= 1){
+    sig_limit <- max(sig_df$p)
+  } else {
+    sig_limit <- 10E-07
+  }
+  
+  # Create data frame
+  limma_man <- get(paste0("df_", cohort)) %>% 
+    arrange(
+      chr, start
+    )
+  
+  # Initialize variables
+  limma_man$start_cum <- NA
+  s <- 0
+  nbp <- c()
+  
+  # Loop
+  for(i in unique(limma_man$chr)){
+    nbp[i] <- max(
+      limma_man[limma_man$chr == i,]$start
+    )
+    limma_man[limma_man$chr == i, "startcum"] <- limma_man[limma_man$chr == i, 
+                                                           "start"] + s
+    s <- s + nbp[i]
+  }
+  
+  # Set axis
+  axis.set <- limma_man %>% 
+    group_by(chr) %>% 
+    summarize(center = (max(startcum) + min(startcum)) / 2)
+  
+  # Draw plot
+  assign(paste0('plot_', cohort),
+         ggplot(
+           limma_man,
+           aes(
+             x=startcum,
+             y=-log10(p),
+             color=as.factor(chr))) +
+           geom_point(
+             size=0.8
+           ) + 
+           geom_hline(
+             yintercept = -log10(sig_limit),
+             color = "#D62839",
+             size = 0.5, 
+             linetype = "dashed"
+           ) +
+           scale_x_continuous(
+             label = axis.set$chr,
+             breaks = axis.set$center
+           ) +
+           scale_y_continuous(
+             expand = c(0,0),
+             limits = c(0, p_max)
+           ) +
+           scale_size_continuous(
+             range = c(0.5, 3)
+           ) +
+           scale_color_manual(
+             values = rep(c("#ACAFAF", "#548687"), 11)
+           ) +
+           xlab("") +
+           ylab(bquote(-log[10]~"p")) +
+           ggtitle(toupper(cohort)) +
+           theme( 
+              legend.position = "none",
+              panel.background = element_rect(fill="white"),
+              panel.border = element_rect(color="#1B2021", fill=NA),
+              panel.grid.major.x = element_blank(),
+              panel.grid.minor.x = element_blank(),
+              axis.text.y = element_text(size = 9, color = '#1B2021'),
+              axis.text.x = element_text(angle = 90, size = 4, 
+                               vjust = 0.5, color = '#1B2021'),
+              axis.title = element_text(size=11, color = '#1B2021'),
+              plot.title = element_text(size = 12, hjust=0.5,
+                              color = '#548687', face = 'bold')),
+         envir=.GlobalEnv)
+  
+  
+}
+```
+
+***
+
+LLS
+
+```{r}
+draw_man("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_man("kora")
+```
+
+***
+
+TwinsUK
+
+```{r}
+draw_man("tuk")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_man("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_man("ship")
+```
+
+***
+
+GOLDN
+
+```{r}
+draw_man("goldn")
+```
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(
+  plot_lls, 
+  plot_kora, 
+  plot_tuk,
+  plot_lld,
+  plot_ship,
+  plot_goldn,
+  ncol = 3, nrow = 2)
+```
+
+***
+
+### Boxplots
+
+***
+
+Make plot of effect size distributions in each cohort
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_LLS = as.numeric(beta_lls),
+    beta_KORA = as.numeric(beta_kora),
+    beta_TwinsUK = as.numeric(beta_tuk),
+    beta_LLD = as.numeric(beta_lld),
+    beta_SHIP = as.numeric(beta_ship),
+    beta_GOLDN = as.numeric(beta_goldn)
+  )
+
+beta_df <- pivot_longer(
+  data = limma_base,
+  cols = c("beta_LLS", "beta_KORA", "beta_TwinsUK", 
+           "beta_LLD", "beta_SHIP", "beta_GOLDN"),
+  names_to = "cohort",
+  names_prefix = "beta_",
+  values_to = "beta",
+  values_drop_na = TRUE
+)
+
+beta_df %>% 
+  ggplot(aes(x = cohort, y = beta, fill = cohort)) +
+  scale_fill_manual(values = c('#e2455f', '#66cec8', '#eaa87d',
+                               '#f9f5e0', '#794f7a', '#5FA052')) +
+  geom_boxplot(alpha = 0.8) +
+  ggtitle("Effect size distributions by cohort") +
+  ylab("\u03b2") + xlab("Cohort") +
+  theme( 
+    panel.background = element_rect(
+      fill="white"),
+    panel.border = element_rect(
+      color="#1B2021", fill=NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.y = element_text(size = 12, color = "#1B2021"),
+    axis.text.x = element_text(size = 12, color = "#1B2021"),
+    axis.title = element_text(size=11, color = "#1B2021"),
+    plot.title = element_text(size = 16, hjust=0.5,
+                              color = "#548687", face = "bold"))
+```
+
+***
+
+Make plot of SE distribution in each cohort
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    SE_LLS = as.numeric(SE_lls),
+    SE_KORA = as.numeric(SE_kora),
+    SE_TwinsUK = as.numeric(SE_tuk),
+    SE_LLD = as.numeric(SE_lld),
+    SE_SHIP = as.numeric(SE_ship),
+    SE_GOLDN = as.numeric(SE_goldn)
+  )
+
+SE_df <- pivot_longer(
+  data = limma_base,
+  cols = c("SE_LLS", "SE_KORA", "SE_TwinsUK", 
+           "SE_LLD", "SE_SHIP", "SE_GOLDN"),
+  names_to = "cohort",
+  names_prefix = "SE_",
+  values_to = "SE",
+  values_drop_na = TRUE
+)
+
+SE_df %>% 
+  ggplot(aes(x = cohort, y = SE, fill = cohort)) +
+  scale_fill_manual(values = c('#e2455f', '#66cec8', '#eaa87d',
+                               '#f9f5e0', '#794f7a', '#5FA052')) +
+  geom_boxplot(alpha = 0.6) +
+  ggtitle("SE distributions by cohort") +
+  ylab("SE") + xlab("Cohort") +
+  theme( 
+    panel.background = element_rect(
+      fill="white"),
+    panel.border = element_rect(
+      color="#1B2021", fill=NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.y = element_text(size = 12, color = "#1B2021"),
+    axis.text.x = element_text(size = 12, color = "#1B2021"),
+    axis.title = element_text(size=11, color = "#1B2021"),
+    plot.title = element_text(size = 16, hjust=0.5,
+                              color = "#548687", face = "bold"))
+```
+
+***
+
+# Adiponectin EWAS - Smoking Sensitivity Analysis
+
+***
+
+### Load data
+
+This contains data on:
+
+* `cpg` - probe ID
+* `beta_` - effect size reported by each cohort
+* `SE_` - standard error reported by each cohort
+* `p_`- unadjusted p-value reported by each cohort
+* `N_` - sample size of each cohort
+
+```{r}
+load("../Adi_Data/Cohort_Results/ALL_ln-adi_ext1.Rdata")
+limma_base[1:5, 1:5]
+```
+
+Ensure all variables are numeric
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_lls = as.numeric(beta_lls),
+    beta_kora = as.numeric(beta_kora),
+    beta_tuk = as.numeric(beta_tuk),
+    beta_lld = as.numeric(beta_lld),
+    beta_ship = as.numeric(beta_ship),
+    beta_goldn = as.numeric(beta_goldn),
+    SE_lls = as.numeric(SE_lls),
+    SE_kora = as.numeric(SE_kora),
+    SE_tuk = as.numeric(SE_tuk),
+    SE_lld = as.numeric(SE_lld),
+    SE_ship = as.numeric(SE_ship),
+    SE_goldn = as.numeric(SE_goldn),
+    p_lls = as.numeric(p_lls),
+    p_kora = as.numeric(p_kora),
+    p_tuk = as.numeric(p_tuk),
+    p_lld = as.numeric(p_lld),
+    p_ship = as.numeric(p_ship),
+    p_goldn = as.numeric(p_goldn),
+    N_lls = as.numeric(N_lls),
+    N_kora = as.numeric(N_kora),
+    N_tuk = as.numeric(N_tuk),
+    N_lld = as.numeric(N_lld),
+    N_ship = as.numeric(N_ship),
+    N_goldn = as.numeric(N_goldn)
+  )
+```
+
+***
+
+### Outlier Removal
+
+Outliers are defined as:
+
+* NA values for beta or SE
+* Based on less than 50 observations
+
+***
+
+LLS
+
+```{r}
+outlier_removal("lls")
+dim(df_lls)
+```
+
+***
+
+KORA
+
+```{r}
+outlier_removal("kora")
+dim(df_kora)
+```
+
+***
+
+TwinsUK
+
+```{r}
+outlier_removal("tuk")
+dim(df_tuk)
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+outlier_removal("lld")
+dim(df_lld)
+```
+
+***
+
+SHIP
+
+```{r}
+outlier_removal("ship")
+dim(df_ship)
+```
+
+***
+
+GOLDN
+
+```{r}
+outlier_removal("goldn")
+dim(df_goldn)
+```
+
+***
+
+### Probe Removal
+
+***
+
+LLS
+
+```{r}
+probe_removal("lls")
+dim(df_lls)
+
+cpgs_lls <- df_lls$cpg
+```
+
+***
+
+KORA
+
+```{r}
+probe_removal("kora")
+dim(df_kora)
+
+cpgs_kora <- df_kora$cpg
+```
+
+***
+
+TwinsUK
+
+```{r}
+probe_removal("tuk")
+dim(df_tuk)
+
+cpgs_tuk <- df_tuk$cpg
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+probe_removal("lld")
+dim(df_lld)
+
+cpgs_lld <- df_lld$cpg
+```
+
+***
+
+SHIP
+
+```{r}
+probe_removal("ship")
+dim(df_ship)
+
+cpgs_ship <- df_ship$cpg
+```
+
+***
+
+GOLDN
+
+```{r}
+probe_removal("goldn")
+dim(df_goldn)
+
+cpgs_goldn <- df_goldn$cpg
+```
+
+***
+
+ALL
+
+```{r}
+all_cpgs <- unique(c(df_lls$cpg, df_kora$cpg, df_tuk$cpg,
+                     df_lld$cpg))
+print(paste0("In the main 5 cohorts, we have data on ", 
+             length(all_cpgs), " CpGs from the 450K array..."))
+```
+
+***
+
+Remove rows based on observations under 50
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_lls = ifelse(N_lls < 50 | !cpg %in% cpgs_lls, NA, beta_lls),
+    beta_kora = ifelse(N_kora < 50 | !cpg %in% cpgs_kora, NA, beta_kora),
+    beta_tuk = ifelse(N_tuk < 50 | !cpg %in% cpgs_tuk, NA, beta_tuk),
+    beta_lld = ifelse(N_lld < 50 | !cpg %in% cpgs_lld, NA, beta_lld),
+    beta_ship = ifelse(N_ship < 50 | !cpg %in% cpgs_ship, NA, beta_ship),
+    beta_goldn = ifelse(N_goldn < 50 | !cpg %in% cpgs_goldn, NA, beta_goldn),
+    SE_lls = ifelse(N_lls < 50 | !cpg %in% cpgs_lls, NA, SE_lls),
+    SE_kora = ifelse(N_kora < 50 | !cpg %in% cpgs_kora, NA, SE_kora),
+    SE_tuk = ifelse(N_tuk < 50 | !cpg %in% cpgs_tuk, NA, SE_tuk),
+    SE_lld = ifelse(N_lld < 50 | !cpg %in% cpgs_lld, NA, SE_lld),
+    SE_ship = ifelse(N_ship < 50 | !cpg %in% cpgs_ship, NA, SE_ship),
+    SE_goldn = ifelse(N_goldn < 50 | !cpg %in% cpgs_goldn, NA, SE_goldn)
+  ) %>% 
+  filter(cpg %in% all_cpgs)
+```
+
+***
+
+### Save ALL
+
+```{r}
+save(limma_base, 
+     file="../Adi_Data/Processing/ALL-2-PRUNE_ln-adi_ext1.Rdata")
+```
+
+***
+
+## Quality Control Plots
+
+For all cohorts, we want to plot:
+
+* QQ plots side by side
+* Volcano plots side by side
+* Manhattan plots side by side
+* Boxplots of effect sizes
+* Boxplots of SEs
+
+***
+
+### QQ plots 
+
+***
+
+LLS
+
+```{r}
+draw_qq("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_qq("kora")
+```
+
+***
+
+TwinsUK
+
+```{r}
+draw_qq("tuk")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_qq("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_qq("ship")
+```
+
+***
+
+GOLDN
+
+```{r}
+draw_qq("goldn")
+```
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(plot_lls, 
+          plot_kora, 
+          plot_tuk, 
+          plot_lld,
+          plot_ship,
+          plot_goldn,
+          ncol = 3, nrow = 2)
+```
+
+***
+
+### Volcano Plots
+
+***
+
+Make scale
+
+```{r}
+min <- as.numeric(-max(c(
+  abs(limma_base$beta_lls), 
+  abs(limma_base$beta_kora),
+  abs(limma_base$beta_tuk),
+  abs(limma_base$beta_lld),
+  abs(limma_base$beta_ship),
+  abs(limma_base$beta_goldn)),
+  na.rm=TRUE) - 0.005)
+
+max <- as.numeric(max(c(
+  abs(limma_base$beta_lls), 
+  abs(limma_base$beta_kora),
+  abs(limma_base$beta_tuk),
+  abs(limma_base$beta_lld),
+  abs(limma_base$beta_ship),
+  abs(limma_base$beta_goldn)),
+  na.rm=TRUE) + 0.005)
+
+p_max <- as.numeric(-log10(min(c(
+  limma_base$p_lls,
+  limma_base$p_kora,
+  limma_base$p_tuk,
+  limma_base$p_lld,
+  limma_base$p_ship,
+  limma_base$p_goldn),
+  na.rm=TRUE))) + 2
+```
+
+***
+
+LLS
+
+```{r}
+draw_volcano("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_volcano("kora")
+```
+
+***
+
+TwinsUK
+
+```{r}
+draw_volcano("tuk")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_volcano("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_volcano("ship")
+```
+
+***
+
+GOLDN
+
+```{r}
+draw_volcano("goldn")
+```
+
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(
+  plot_lls, 
+  plot_kora, 
+  plot_tuk,
+  plot_lld,
+  plot_ship,
+  plot_goldn,
+  ncol = 3, nrow = 2)
+```
+
+***
+
+### Manhattan plots
+
+***
+
+LLS
+
+```{r}
+draw_man("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_man("kora")
+```
+
+***
+
+TwinsUK
+
+```{r}
+draw_man("tuk")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_man("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_man("ship")
+```
+
+***
+
+GOLDN
+
+```{r}
+draw_man("goldn")
+```
+
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(
+  plot_lls, 
+  plot_kora, 
+  plot_tuk,
+  plot_lld,
+  plot_ship,
+  plot_goldn,
+  ncol = 3, nrow = 2)
+```
+
+***
+
+### Boxplots
+
+***
+
+Make plot of effect size distributions in each cohort
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_LLS = as.numeric(beta_lls),
+    beta_KORA = as.numeric(beta_kora),
+    beta_TwinsUK = as.numeric(beta_tuk),
+    beta_LLD = as.numeric(beta_lld),
+    beta_SHIP = as.numeric(beta_ship),
+    beta_GOLDN = as.numeric(beta_goldn)
+  )
+
+beta_df <- pivot_longer(
+  data = limma_base,
+  cols = c("beta_LLS", "beta_KORA", "beta_TwinsUK", 
+           "beta_LLD", "beta_SHIP", "beta_GOLDN"),
+  names_to = "cohort",
+  names_prefix = "beta_",
+  values_to = "beta",
+  values_drop_na = TRUE
+)
+
+beta_df %>% 
+  ggplot(aes(x = cohort, y = beta, fill = cohort)) +
+  scale_fill_manual(values = c('#e2455f', '#66cec8', '#eaa87d',
+                               '#f9f5e0', '#794f7a', '#5FA052')) +
+  geom_boxplot(alpha = 0.8) +
+  ggtitle("Effect size distributions by cohort") +
+  ylab("\u03b2") + xlab("Cohort") +
+  theme( 
+    panel.background = element_rect(
+      fill="white"),
+    panel.border = element_rect(
+      color="#1B2021", fill=NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.y = element_text(size = 12, color = "#1B2021"),
+    axis.text.x = element_text(size = 12, color = "#1B2021"),
+    axis.title = element_text(size=11, color = "#1B2021"),
+    plot.title = element_text(size = 16, hjust=0.5,
+                              color = "#548687", face = "bold"))
+```
+
+***
+
+Make plot of SE distribution in each cohort
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    SE_LLS = as.numeric(SE_lls),
+    SE_KORA = as.numeric(SE_kora),
+    SE_TwinsUK = as.numeric(SE_tuk),
+    SE_LLD = as.numeric(SE_lld),
+    SE_SHIP = as.numeric(SE_ship),
+    SE_GOLDN = as.numeric(SE_goldn)
+  )
+
+SE_df <- pivot_longer(
+  data = limma_base,
+  cols = c("SE_LLS", "SE_KORA", "SE_TwinsUK", 
+           "SE_LLD", "SE_SHIP", "SE_GOLDN"),
+  names_to = "cohort",
+  names_prefix = "SE_",
+  values_to = "SE",
+  values_drop_na = TRUE
+)
+
+SE_df %>% 
+  ggplot(aes(x = cohort, y = SE, fill = cohort)) +
+  scale_fill_manual(values = c('#e2455f', '#66cec8', '#eaa87d',
+                               '#f9f5e0', '#794f7a', '#5FA052')) +
+  geom_boxplot(alpha = 0.6) +
+  ggtitle("SE distributions by cohort") +
+  ylab("SE") + xlab("Cohort") +
+  theme( 
+    panel.background = element_rect(
+      fill="white"),
+    panel.border = element_rect(
+      color="#1B2021", fill=NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.y = element_text(size = 12, color = "#1B2021"),
+    axis.text.x = element_text(size = 12, color = "#1B2021"),
+    axis.title = element_text(size=11, color = "#1B2021"),
+    plot.title = element_text(size = 16, hjust=0.5,
+                              color = "#548687", face = "bold"))
+```
+
+***
+
+# Adiponectin EWAS - BMI Sensitivity Analysis
+
+***
+
+### Load data
+
+This contains data on:
+
+* `cpg` - probe ID
+* `beta_` - effect size reported by each cohort
+* `SE_` - standard error reported by each cohort
+* `p_`- unadjusted p-value reported by each cohort
+* `N_` - sample size of each cohort
+
+```{r}
+load("../Adi_Data/Cohort_Results/ALL_ln-adi_ext2.Rdata")
+limma_base[1:5, 1:5]
+```
+
+
+Ensure all variables are numeric
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_lls = as.numeric(beta_lls),
+    beta_kora = as.numeric(beta_kora),
+    beta_tuk = as.numeric(beta_tuk),
+    beta_lld = as.numeric(beta_lld),
+    beta_ship = as.numeric(beta_ship),
+    beta_goldn = as.numeric(beta_goldn),
+    SE_lls = as.numeric(SE_lls),
+    SE_kora = as.numeric(SE_kora),
+    SE_tuk = as.numeric(SE_tuk),
+    SE_lld = as.numeric(SE_lld),
+    SE_ship = as.numeric(SE_ship),
+    SE_goldn = as.numeric(SE_goldn),
+    p_lls = as.numeric(p_lls),
+    p_kora = as.numeric(p_kora),
+    p_tuk = as.numeric(p_tuk),
+    p_lld = as.numeric(p_lld),
+    p_ship = as.numeric(p_ship),
+    p_goldn = as.numeric(p_goldn),
+    N_lls = as.numeric(N_lls),
+    N_kora = as.numeric(N_kora),
+    N_tuk = as.numeric(N_tuk),
+    N_lld = as.numeric(N_lld),
+    N_ship = as.numeric(N_ship),
+    N_goldn = as.numeric(N_goldn)
+  )
+```
+
+***
+
+### Outlier Removal
+
+Outliers are defined as:
+
+* NA values for beta or SE
+* Based on less than 50 observations
+
+***
+
+LLS
+
+```{r}
+outlier_removal("lls")
+dim(df_lls)
+```
+
+***
+
+KORA
+
+```{r}
+outlier_removal("kora")
+dim(df_kora)
+```
+
+***
+
+TwinsUK
+
+```{r}
+outlier_removal("tuk")
+dim(df_tuk)
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+outlier_removal("lld")
+dim(df_lld)
+```
+
+***
+
+SHIP
+
+```{r}
+outlier_removal("ship")
+dim(df_ship)
+```
+
+***
+
+GOLDN
+
+```{r}
+outlier_removal("goldn")
+dim(df_goldn)
+```
+
+
+***
+
+### Probe Removal
+
+***
+
+LLS
+
+```{r}
+probe_removal("lls")
+dim(df_lls)
+
+cpgs_lls <- df_lls$cpg
+```
+
+***
+
+KORA
+
+```{r}
+probe_removal("kora")
+dim(df_kora)
+
+cpgs_kora <- df_kora$cpg
+```
+
+***
+
+TwinsUK
+
+```{r}
+probe_removal("tuk")
+dim(df_tuk)
+
+cpgs_tuk <- df_tuk$cpg
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+probe_removal("lld")
+dim(df_lld)
+
+cpgs_lld <- df_lld$cpg
+```
+
+***
+
+SHIP
+
+```{r}
+probe_removal("ship")
+dim(df_ship)
+
+cpgs_ship <- df_ship$cpg
+```
+
+***
+
+GOLDN
+
+```{r}
+probe_removal("goldn")
+dim(df_goldn)
+
+cpgs_goldn <- df_goldn$cpg
+```
+
+
+***
+
+ALL
+
+```{r}
+all_cpgs <- unique(c(df_lls$cpg, df_kora$cpg, df_tuk$cpg,
+                     df_lld$cpg))
+print(paste0("In the main 5 cohorts, we have data on ", 
+             length(all_cpgs), " CpGs from the 450K array..."))
+```
+
+***
+
+Remove rows based on observations under 50
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_lls = ifelse(N_lls < 50 | !cpg %in% cpgs_lls, NA, beta_lls),
+    beta_kora = ifelse(N_kora < 50 | !cpg %in% cpgs_kora, NA, beta_kora),
+    beta_tuk = ifelse(N_tuk < 50 | !cpg %in% cpgs_tuk, NA, beta_tuk),
+    beta_lld = ifelse(N_lld < 50 | !cpg %in% cpgs_lld, NA, beta_lld),
+    beta_ship = ifelse(N_ship < 50 | !cpg %in% cpgs_ship, NA, beta_ship),
+    beta_goldn = ifelse(N_goldn < 50 | !cpg %in% cpgs_goldn, NA, beta_goldn),
+    SE_lls = ifelse(N_lls < 50 | !cpg %in% cpgs_lls, NA, SE_lls),
+    SE_kora = ifelse(N_kora < 50 | !cpg %in% cpgs_kora, NA, SE_kora),
+    SE_tuk = ifelse(N_tuk < 50 | !cpg %in% cpgs_tuk, NA, SE_tuk),
+    SE_lld = ifelse(N_lld < 50 | !cpg %in% cpgs_lld, NA, SE_lld),
+    SE_ship = ifelse(N_ship < 50 | !cpg %in% cpgs_ship, NA, SE_ship),
+    SE_goldn = ifelse(N_goldn < 50 | !cpg %in% cpgs_goldn, NA, SE_goldn)
+  ) %>% 
+  filter(cpg %in% all_cpgs)
+```
+
+***
+
+### Save ALL
+
+```{r}
+save(limma_base, 
+     file="../Adi_Data/Processing/ALL-2-PRUNE_ln-adi_ext2.Rdata")
+```
+
+***
+
+## Quality Control Plots
+
+For all cohorts, we want to plot:
+
+* QQ plots side by side
+* Volcano plots side by side
+* Manhattan plots side by side
+* Boxplots of effect sizes
+* Boxplots of SEs
+
+***
+
+### QQ plots 
+
+***
+
+LLS
+
+```{r}
+draw_qq("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_qq("kora")
+```
+
+***
+
+TwinsUK
+
+```{r}
+draw_qq("tuk")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_qq("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_qq("ship")
+```
+
+***
+
+GOLDN
+
+```{r}
+draw_qq("goldn")
+```
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(plot_lls, 
+          plot_kora, 
+          plot_tuk, 
+          plot_lld,
+          plot_ship,
+          plot_goldn,
+          ncol = 3, nrow = 2)
+```
+
+***
+
+### Volcano Plots
+
+***
+
+Make scale
+
+```{r}
+min <- as.numeric(-max(c(
+  abs(limma_base$beta_lls), 
+  abs(limma_base$beta_kora),
+  abs(limma_base$beta_tuk),
+  abs(limma_base$beta_lld),
+  abs(limma_base$beta_ship),
+  abs(limma_base$beta_goldn)),
+  na.rm=TRUE) - 0.005)
+
+max <- as.numeric(max(c(
+  abs(limma_base$beta_lls), 
+  abs(limma_base$beta_kora),
+  abs(limma_base$beta_tuk),
+  abs(limma_base$beta_lld),
+  abs(limma_base$beta_ship),
+  abs(limma_base$beta_goldn)),
+  na.rm=TRUE) + 0.005)
+
+p_max <- as.numeric(-log10(min(c(
+  limma_base$p_lls,
+  limma_base$p_kora,
+  limma_base$p_tuk,
+  limma_base$p_lld,
+  limma_base$p_ship,
+  limma_base$p_goldn),
+  na.rm=TRUE))) + 2
+```
+
+***
+
+LLS
+
+```{r}
+draw_volcano("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_volcano("kora")
+```
+
+***
+
+TwinsUK
+
+```{r}
+draw_volcano("tuk")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_volcano("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_volcano("ship")
+```
+
+***
+
+GOLDN
+
+```{r}
+draw_volcano("goldn")
+```
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(
+  plot_lls, 
+  plot_kora, 
+  plot_tuk,
+  plot_lld,
+  plot_ship,
+  plot_goldn,
+  ncol = 3, nrow = 2)
+```
+
+***
+
+### Manhattan plots
+
+***
+
+LLS
+
+```{r}
+draw_man("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_man("kora")
+```
+
+***
+
+TwinsUK
+
+```{r}
+draw_man("tuk")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_man("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_man("ship")
+```
+
+***
+
+GOLDN
+
+```{r}
+draw_man("goldn")
+```
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(
+  plot_lls, 
+  plot_kora, 
+  plot_tuk,
+  plot_lld,
+  plot_ship,
+  plot_goldn,
+  ncol = 3, nrow = 2)
+```
+
+***
+
+### Boxplots
+
+***
+
+Make plot of effect size distributions in each cohort
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_LLS = as.numeric(beta_lls),
+    beta_KORA = as.numeric(beta_kora),
+    beta_TwinsUK = as.numeric(beta_tuk),
+    beta_LLD = as.numeric(beta_lld),
+    beta_SHIP = as.numeric(beta_ship),
+    beta_GOLDN = as.numeric(beta_goldn)
+  )
+
+beta_df <- pivot_longer(
+  data = limma_base,
+  cols = c("beta_LLS", "beta_KORA", "beta_TwinsUK", 
+           "beta_LLD", "beta_SHIP", "beta_GOLDN"),
+  names_to = "cohort",
+  names_prefix = "beta_",
+  values_to = "beta",
+  values_drop_na = TRUE
+)
+
+beta_df %>% 
+  ggplot(aes(x = cohort, y = beta, fill = cohort)) +
+  scale_fill_manual(values = c('#e2455f', '#66cec8', '#eaa87d',
+                               '#f9f5e0', '#794f7a', '#5FA052')) +
+  geom_boxplot(alpha = 0.8) +
+  ggtitle("Effect size distributions by cohort") +
+  ylab("\u03b2") + xlab("Cohort") +
+  theme( 
+    panel.background = element_rect(
+      fill="white"),
+    panel.border = element_rect(
+      color="#1B2021", fill=NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.y = element_text(size = 12, color = "#1B2021"),
+    axis.text.x = element_text(size = 12, color = "#1B2021"),
+    axis.title = element_text(size=11, color = "#1B2021"),
+    plot.title = element_text(size = 16, hjust=0.5,
+                              color = "#548687", face = "bold"))
+```
+
+***
+
+Make plot of SE distribution in each cohort
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    SE_LLS = as.numeric(SE_lls),
+    SE_KORA = as.numeric(SE_kora),
+    SE_TwinsUK = as.numeric(SE_tuk),
+    SE_LLD = as.numeric(SE_lld),
+    SE_SHIP = as.numeric(SE_ship),
+    SE_GOLDN = as.numeric(SE_goldn)
+  )
+
+SE_df <- pivot_longer(
+  data = limma_base,
+  cols = c("SE_LLS", "SE_KORA", "SE_TwinsUK", 
+           "SE_LLD", "SE_SHIP", "SE_GOLDN"),
+  names_to = "cohort",
+  names_prefix = "SE_",
+  values_to = "SE",
+  values_drop_na = TRUE
+)
+
+SE_df %>% 
+  ggplot(aes(x = cohort, y = SE, fill = cohort)) +
+  scale_fill_manual(values = c('#e2455f', '#66cec8', '#eaa87d',
+                               '#f9f5e0', '#794f7a', '#5FA052')) +
+  geom_boxplot(alpha = 0.6) +
+  ggtitle("SE distributions by cohort") +
+  ylab("SE") + xlab("Cohort") +
+  theme( 
+    panel.background = element_rect(
+      fill="white"),
+    panel.border = element_rect(
+      color="#1B2021", fill=NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.y = element_text(size = 12, color = "#1B2021"),
+    axis.text.x = element_text(size = 12, color = "#1B2021"),
+    axis.title = element_text(size=11, color = "#1B2021"),
+    plot.title = element_text(size = 16, hjust=0.5,
+                              color = "#548687", face = "bold"))
+```
+
+***
+
+# Adiponectin EWAS - Epidish Sensitivity analysis
+
+***
+
+### Load data
+
+This contains data on:
+
+* `cpg` - probe ID
+* `beta_` - effect size reported by each cohort
+* `SE_` - standard error reported by each cohort
+* `p_`- unadjusted p-value reported by each cohort
+* `N_` - sample size of each cohort
+
+```{r}
+load("../Adi_Data/Cohort_Results/ALL_ln-adi_ext3.Rdata")
+limma_base[1:5, 1:5]
+```
+
+
+Ensure all variables are numeric
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_lls = as.numeric(beta_lls),
+    beta_kora = as.numeric(beta_kora),
+    beta_lld = as.numeric(beta_lld),
+    beta_ship = as.numeric(beta_ship),
+    SE_lls = as.numeric(SE_lls),
+    SE_kora = as.numeric(SE_kora),
+    SE_lld = as.numeric(SE_lld),
+    SE_ship = as.numeric(SE_ship),
+    p_lls = as.numeric(p_lls),
+    p_kora = as.numeric(p_kora),
+    p_lld = as.numeric(p_lld),
+    p_ship = as.numeric(p_ship),
+    N_lls = as.numeric(N_lls),
+    N_kora = as.numeric(N_kora),
+    N_lld = as.numeric(N_lld),
+    N_ship = as.numeric(N_ship)
+  )
+```
+
+***
+
+### Outlier Removal
+
+Outliers are defined as:
+
+* NA values for beta or SE
+* Based on less than 50 observations
+
+***
+
+LLS
+
+```{r}
+outlier_removal("lls")
+dim(df_lls)
+```
+
+***
+
+KORA
+
+```{r}
+outlier_removal("kora")
+dim(df_kora)
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+outlier_removal("lld")
+dim(df_lld)
+```
+
+***
+
+SHIP
+
+```{r}
+outlier_removal("ship")
+dim(df_ship)
+```
+
+***
+
+### Probe Removal
+
+***
+
+LLS
+
+```{r}
+probe_removal("lls")
+dim(df_lls)
+
+cpgs_lls <- df_lls$cpg
+```
+
+***
+
+KORA
+
+```{r}
+probe_removal("kora")
+dim(df_kora)
+
+cpgs_kora <- df_kora$cpg
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+probe_removal("lld")
+dim(df_lld)
+
+cpgs_lld <- df_lld$cpg
+```
+
+***
+
+SHIP
+
+```{r}
+probe_removal("ship")
+dim(df_ship)
+
+cpgs_ship <- df_ship$cpg
+```
+
+***
+
+ALL
+
+```{r}
+all_cpgs <- unique(c(df_lls$cpg, df_kora$cpg,
+                     df_lld$cpg))
+print(paste0("In the main 5 cohorts, we have data on ", 
+             length(all_cpgs), " CpGs from the 450K array..."))
+```
+
+***
+
+Remove rows based on observations under 50
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_lls = ifelse(N_lls < 50 | !cpg %in% cpgs_lls, NA, beta_lls),
+    beta_kora = ifelse(N_kora < 50 | !cpg %in% cpgs_kora, NA, beta_kora),
+    beta_lld = ifelse(N_lld < 50 | !cpg %in% cpgs_lld, NA, beta_lld),
+    beta_ship = ifelse(N_ship < 50 | !cpg %in% cpgs_ship, NA, beta_ship),
+    SE_lls = ifelse(N_lls < 50 | !cpg %in% cpgs_lls, NA, SE_lls),
+    SE_kora = ifelse(N_kora < 50 | !cpg %in% cpgs_kora, NA, SE_kora),
+    SE_lld = ifelse(N_lld < 50 | !cpg %in% cpgs_lld, NA, SE_lld),
+    SE_ship = ifelse(N_ship < 50 | !cpg %in% cpgs_ship, NA, SE_ship)
+  ) %>% 
+  filter(cpg %in% all_cpgs)
+```
+
+***
+
+### Save ALL
+
+```{r}
+save(limma_base, 
+     file="../Adi_Data/Processing/ALL-2-PRUNE_ln-adi_ext3.Rdata")
+```
+
+***
+
+## Quality Control Plots
+
+For all cohorts, we want to plot:
+
+* QQ plots side by side
+* Volcano plots side by side
+* Manhattan plots side by side
+* Boxplots of effect sizes
+* Boxplots of SEs
+
+***
+
+### QQ plots 
+
+***
+
+LLS
+
+```{r}
+draw_qq("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_qq("kora")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_qq("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_qq("ship")
+```
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(plot_lls, 
+          plot_kora, 
+          plot_lld,
+          plot_ship,
+          ncol = 2, nrow = 2)
+```
+
+***
+
+### Volcano Plots
+
+***
+
+Make scale
+
+```{r}
+min <- as.numeric(-max(c(
+  abs(limma_base$beta_lls), 
+  abs(limma_base$beta_kora),
+  abs(limma_base$beta_lld),
+  abs(limma_base$beta_ship)),
+  na.rm=TRUE) - 0.005)
+
+max <- as.numeric(max(c(
+  abs(limma_base$beta_lls), 
+  abs(limma_base$beta_kora),
+  abs(limma_base$beta_lld),
+  abs(limma_base$beta_ship)),
+  na.rm=TRUE) + 0.005)
+
+p_max <- as.numeric(-log10(min(c(
+  limma_base$p_lls,
+  limma_base$p_kora,
+  limma_base$p_lld,
+  limma_base$p_ship),
+  na.rm=TRUE))) + 2
+```
+
+***
+
+LLS
+
+```{r}
+draw_volcano("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_volcano("kora")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_volcano("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_volcano("ship")
+```
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(
+  plot_lls, 
+  plot_kora, 
+  plot_lld,
+  plot_ship,
+  ncol = 2, nrow = 2)
+```
+
+***
+
+### Manhattan plots
+
+***
+
+LLS
+
+```{r}
+draw_man("lls")
+```
+
+***
+
+KORA
+
+```{r}
+draw_man("kora")
+```
+
+***
+
+LifeLines Deep
+
+```{r}
+draw_man("lld")
+```
+
+***
+
+SHIP
+
+```{r}
+draw_man("ship")
+```
+
+***
+
+Draw
+
+```{r out.width="100%"}
+ggarrange(
+  plot_lls, 
+  plot_kora, 
+  plot_lld,
+  plot_ship,
+  ncol = 2, nrow = 2)
+```
+
+***
+
+### Boxplots
+
+***
+
+Make plot of effect size distributions in each cohort
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    beta_LLS = as.numeric(beta_lls),
+    beta_KORA = as.numeric(beta_kora),
+    beta_LLD = as.numeric(beta_lld),
+    beta_SHIP = as.numeric(beta_ship)
+  )
+
+beta_df <- pivot_longer(
+  data = limma_base,
+  cols = c("beta_LLS", "beta_KORA", 
+           "beta_LLD", "beta_SHIP"),
+  names_to = "cohort",
+  names_prefix = "beta_",
+  values_to = "beta",
+  values_drop_na = TRUE
+)
+
+beta_df %>% 
+  ggplot(aes(x = cohort, y = beta, fill = cohort)) +
+  scale_fill_manual(values = c('#e2455f', '#66cec8', '#eaa87d',
+                               '#f9f5e0')) +
+  geom_boxplot(alpha = 0.8) +
+  ggtitle("Effect size distributions by cohort") +
+  ylab("\u03b2") + xlab("Cohort") +
+  theme( 
+    panel.background = element_rect(
+      fill="white"),
+    panel.border = element_rect(
+      color="#1B2021", fill=NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.y = element_text(size = 12, color = "#1B2021"),
+    axis.text.x = element_text(size = 12, color = "#1B2021"),
+    axis.title = element_text(size=11, color = "#1B2021"),
+    plot.title = element_text(size = 16, hjust=0.5,
+                              color = "#548687", face = "bold"))
+```
+
+***
+
+Make plot of SE distribution in each cohort
+
+```{r}
+limma_base <- limma_base %>% 
+  mutate(
+    SE_LLS = as.numeric(SE_lls),
+    SE_KORA = as.numeric(SE_kora),
+    SE_LLD = as.numeric(SE_lld),
+    SE_SHIP = as.numeric(SE_ship)
+  )
+
+SE_df <- pivot_longer(
+  data = limma_base,
+  cols = c("SE_LLS", "SE_KORA",
+           "SE_LLD", "SE_SHIP"),
+  names_to = "cohort",
+  names_prefix = "SE_",
+  values_to = "SE",
+  values_drop_na = TRUE
+)
+
+SE_df %>% 
+  ggplot(aes(x = cohort, y = SE, fill = cohort)) +
+  scale_fill_manual(values = c('#e2455f', '#66cec8', '#eaa87d',
+                               '#f9f5e0')) +
+  geom_boxplot(alpha = 0.6) +
+  ggtitle("SE distributions by cohort") +
+  ylab("SE") + xlab("Cohort") +
+  theme( 
+    panel.background = element_rect(
+      fill="white"),
+    panel.border = element_rect(
+      color="#1B2021", fill=NA),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.text.y = element_text(size = 12, color = "#1B2021"),
+    axis.text.x = element_text(size = 12, color = "#1B2021"),
+    axis.title = element_text(size=11, color = "#1B2021"),
+    plot.title = element_text(size = 16, hjust=0.5,
+                              color = "#548687", face = "bold"))
+```
+
+***

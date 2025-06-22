@@ -1,0 +1,124 @@
+---
+title: "Adipokine EWAS - Script 16: Overrepresentation analysis"
+author: "Lucy Sinke"
+output: html_document
+---
+
+Load packages
+
+```{r warning=FALSE, message=FALSE}
+library(clusterProfiler)
+library(tidyverse)
+```
+
+***
+
+# Adiponectin data
+
+```{r}
+adi_genes <- read_csv('LLS_Adi_geneList-blood.csv')
+unique(adi_genes$cpg)
+adi_genes <- unique((adi_genes %>% group_by(cpg) %>% filter(dist == min(dist)) %>% ungroup())$gene_sym)
+```
+
+```{r}
+out <- out %>% filter(padj <= 0.05)
+```
+
+Extract the list of eQTM genes to use in gene set testing.
+
+```{r}
+adi_genes <- unique(adi_genes$gene)
+```
+
+Use the `cinaR` package to add the Ensembl ID and Entrez to the gene names
+
+```{r}
+ens2gene <- cinaR::grch37
+colnames(ens2gene) <- c('geneEns', 'Entrez', 'gene')
+ens2gene <- ens2gene[match(unique(ens2gene$gene),
+                           ens2gene$gene),]
+
+adi_genes <- data.frame(gene = adi_genes)
+adi_genes <- left_join(adi_genes, ens2gene, by='gene')
+head(adi_genes)
+```
+
+***
+
+# Load Pathways
+
+Next, we load the pathways. 
+
+This will be used as `TERM2GENE` in the gene set analysis. 
+
+```{r}
+files <- list.files("./Pathway_db/")
+files
+```
+
+```{r}
+pathways <- lapply(files, function(file) {
+  data <- read.gmt(paste0("./Pathway_db/", file))
+  name <- gsub(".txt", "", file)
+  data$term <- paste(name, data$term, sep = "$")
+  data
+})
+
+pathways <- do.call(rbind, pathways)
+head(pathways)
+```
+
+Check characteristics of pathways
+
+```{r}
+length(unique(pathways$term))
+
+print(paste0('Number of rows: ', nrow(pathways)))
+print(paste0('Unique genes: ', 
+               length(unique(pathways$gene))))
+print(paste0('Number of terms: ',
+               length(unique(pathways$term))))
+print(paste0('Number of genes per term ranging from ',
+               (as.data.frame(table(pathways$term)) %>% 
+                 arrange(Freq))$Freq[1], ' to ',
+        (as.data.frame(table(pathways$term)) %>% 
+                 arrange(desc(Freq)))$Freq[1]))
+print(paste0('Of the genes colocalized with IL-6 CpGs, ',
+               as.data.frame(
+                 table(
+                   il6_genes$gene %in% pathways$gene))[2,2],
+               ' are in at least one pathway'))
+```
+
+Perform gene set enrichment analysis
+
+```{r}
+results <- enricher(
+      gene = adi_genes$gene, 
+      TERM2GENE = pathways, 
+      pAdjustMethod = "fdr",
+      minGSSize = 1, 
+      maxGSSize = 1000000)
+```
+
+Save results
+
+```{r}
+out <- results@result
+out
+out <- out %>% arrange(p.adjust)
+
+out <- out %>% separate(ID, into=c('DB', 'Set'),
+                        sep = '[$]')
+row.names(out) <- NULL
+out$Description <- NULL
+
+sig_set <- out %>% filter(p.adjust <= 0.05)
+sig_set
+```
+
+```{r}
+write_csv(sig_set, file='ST11.csv')
+```
+

@@ -1,0 +1,374 @@
+---
+title: "Adipokine EWAS - Script 15: BIOS eQTM"
+author: "Lucy Sinke"
+output: html_document
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_knit$set(root.dir = '/exports/molepi/users/ljsinke/LLS/Adi_Scripts/')
+```
+
+
+```{r warning=FALSE, message=FALSE}
+library(edgeR)
+library(cinaR)
+library(limma)
+library(tidyverse)
+library(GenomicFeatures)
+library(AnnotationHub)
+library(SummarizedExperiment)
+library(lme4)
+library(lmerTest)
+```
+
+Load top CpG results and methData
+
+```{r}
+load('/exports/molepi/users/ljsinke/BIOS/eQTM/data/methData_Betas_BIOS_Freeze2_unrelated.RData')
+load('/exports/molepi/users/ljsinke/BIOS/eQTM/data/rnaSeqData_ReadCounts_BIOS_Freeze2_unrelated_GRCh38.RData')
+```
+
+```{r}
+load('../Adi_Data/Results/AdiTop_2024.Rdata')
+```
+
+
+Make txdb
+
+```{r eval=FALSE}
+txdb <- makeTxDbFromEnsembl(organism = "Homo sapiens",
+                            release = 75,
+                            circ_seqs = NULL,
+                            server = "ensembldb.ensembl.org",
+                            username = "anonymous", 
+                            password = NULL, port = 0L,
+                            tx_attrib = NULL)
+```
+
+Get all genes in GRanges object
+
+```{r eval=FALSE}
+gene_range <- unlist(cdsBy(txdb, by = "gene"))
+gene_range <- unique(gene_range)
+gene_range
+```
+
+```{r}
+load('../Shared_Data/allGeneRanges.Rdata')
+gene_range
+```
+
+***
+
+Make GRanges object
+
+```{r}
+cpg_range <- GRanges(seqnames = top$cpg_chr_hg19, 
+        IRanges(start = top$cpg_start_hg19,
+                width = 2,
+                names = top$cpg))
+cpg_range
+```
+
+Make distance matrix 
+
+```{r}
+distance.matrix <- matrix(NaN, nrow = length(gene_range), ncol = length(cpg_range), dimnames = list(names(gene_range), names(cpg_range)))
+```
+
+Loop through CpGs
+
+```{r}
+for(i in 1:nrow(top)){
+    cpg <- cpg_range[i]
+    calc.distance <- distance(
+      cpg, 
+      gene_range, 
+      ignore.strand = T)
+    distance.matrix[,i] <- calc.distance
+}
+
+dim(distance.matrix)
+
+distance.matrix <- as.data.frame(distance.matrix)
+colnames(distance.matrix) <- names(cpg_range)
+distance.matrix$gene <- names(gene_range)
+```
+
+Make a list of genes within 100kb of each cpg
+
+```{r}
+gene_list <- lapply(names(cpg_range), function(x){
+  df <- (distance.matrix %>% dplyr::select(gene, all_of(x)))
+  colnames(df) <- c('gene', 'cpg')
+  df <- df %>% filter(cpg <= 100000)
+  if (nrow(df) > 0) {
+    return(data.frame(cpg = x,
+                      gene_ens = unique(df$gene)))
+  }
+})
+gene_list[[1]]
+```
+
+Save gene symbols
+
+```{r}
+ens2gene <- cinaR::grch37
+```
+
+Bind
+
+```{r}
+df <- data.frame()
+
+for(i in 1:length(gene_list)){
+  gene_df <- gene_list[[i]]
+  
+  cpg <- gene_df$cpg[1]
+  genes <- unique(gene_df$gene_ens)
+  
+  df <- rbind(df,
+              data.frame(cpg = cpg,
+                         gene_ens = genes))
+}
+
+sym <- ens2gene$symbol[match(df$gene_ens,
+                             ens2gene$ensgene)]
+
+df$gene <- sym
+
+head(df)
+```
+
+Save
+
+```{r}
+save(df, file='../Adi_Data/genes-100kb.Rdata')
+```
+
+
+Save top CpGs that overlap with BIOS data CpGs
+
+```{r eval=FALSE}
+dim(top)
+
+df_cpg <- top %>% 
+  arrange(base_meta_padj_fdr) %>% 
+  filter(cpg %in% rownames(assay(betas)))
+
+dim(df_cpg)
+```
+
+```{r eval=FALSE}
+targets <- as.data.frame(colData(betas)) 
+colnames(targets)
+```
+
+Format targets
+
+```{r eval=FALSE}
+targets <- targets %>% dplyr::select(
+  ID = uuid, age = sampling_age, sex, 
+  chip_pos = sentrix_position, plate = sample_plate,
+  cc_eos_perc = eos_perc, cc_baso_perc = baso_perc,
+  cc_lymph_perc = lymph_perc, cc_mono_perc = mono_perc) %>% 
+  mutate(chip_row = as.numeric(substr(chip_pos,3,3)))
+
+dim(targets)
+targets[1:5, 1:5]
+```
+
+ID list
+
+```{r eval=FALSE}
+ID_list <- targets %>% dplyr::select(ID)
+```
+
+Format betas
+
+```{r eval=FALSE}
+betas <- as.data.frame(t(assay(betas)))
+dim(betas)
+```
+
+Remove X and Y chromosome
+
+```{r eval=FALSE}
+counts  <- dropSeqlevels(counts,  c("X", "Y"), pruning.mode = "coarse")
+```
+
+Finally, for some samples, the flowcell (on which assay chip the sample was measured) is NA. Remove these samples. 
+
+```{r eval=FALSE}
+count.coldata <- as.data.frame(colData(counts))
+idx <- which(is.na(count.coldata$flowcell_num) == TRUE)
+count.coldata <- count.coldata[-idx,]
+counts <- counts[,-idx]
+```
+
+After filtering, you should end up with 3377 samples 
+
+```{r eval=FALSE}
+dim(counts)
+dim(count.coldata)
+```
+
+Filter out low expressed genes
+
+```{r eval=FALSE}
+counts <- counts[rowSums(assays(counts)$data > 0) > 0.5 * ncol(counts), ]
+```
+
+Create an object containing log2-counts per million, using functions from the edgeR package.
+
+```{r eval=FALSE}
+log.cpm <- DGEList(counts = assays(counts)$data)
+log.cpm <- calcNormFactors(log.cpm)
+log.cpm <- cpm(log.cpm, log = T)
+```
+
+Perform a rank-inverse normal (RIN) transformation for each gene.
+
+```{r eval=FALSE}
+RIN <- function(x) {
+  y <- rank(x, NA)
+  y <- ppoints(y)[y]
+  y <- qnorm(y)
+  x[!is.na(x)] <- y
+  x
+}
+RIN.counts <- t(apply(log.cpm, 1, RIN))
+```
+
+```{r eval=FALSE}
+RIN.counts[1:5, 1:5]
+```
+
+RNAseq
+
+```{r eval=FALSE}
+rna_pheno <- count.coldata %>% dplyr::select(uuid, flowcell_num)
+```
+
+```{r eval=FALSE}
+goto_exp <- as.data.frame(t(RIN.counts))
+goto_exp$uuid <- rownames(goto_exp)
+goto_exp <- goto_exp %>% dplyr::select(uuid, everything())
+```
+
+```{r eval=FALSE}
+ens2gene <- cinaR::grch38
+```
+
+```{r eval=FALSE}
+exp_df <- inner_join(rna_pheno, goto_exp, by = 'uuid')
+```
+
+```{r eval=FALSE}
+targets <- targets %>% filter(ID %in% exp_df$uuid)
+betas <- betas[rownames(betas) %in% exp_df$uuid,]
+exp_df <- exp_df %>% filter(uuid %in% targets$ID)
+```
+
+
+```{r eval=FALSE}
+targets$sex <- as.factor(targets$sex)
+targets$chip_row <- as.numeric(targets$chip_row)
+targets$plate <- as.factor(targets$plate)
+
+targets[1:5, 1:10]
+dim(targets)
+summary(targets)
+
+betas[1:5, 1:5]
+dim(betas)
+betas_save <- betas %>% dplyr::select(names(cpg_range))
+
+exp_df$flowcell_num <- as.factor(exp_df$flowcell_num)
+
+exp_df[1:5, 1:5]
+dim(exp_df)
+
+save(exp_df,
+     betas_save,
+     targets,
+     gene_list,
+     cpg_range, 
+     file='../Adi_Data/Coloc/all_eQTM_objects.Rdata')
+```
+
+Run models
+
+```{r eval=FALSE}
+for(i in names(cpg_range)){
+  gene_cpg <- gene_list[[grep(i, gene_list)]]
+  
+  genes <- unique(gene_cpg$gene)
+  
+  keep <- genes %in% colnames(exp_df)
+  
+  genes <- genes[keep]
+  gene_cpg <- gene_cpg %>% filter(gene %in% genes)
+  gene_cpg <- gene_cpg %>% group_by(gene) %>% 
+    mutate(
+      last = if_else(row_number() == n(), 1, 0)
+    ) %>% filter(last == 1) %>% dplyr::select(-last)
+  print(gene_cpg)
+  
+  lm_df <- cbind(targets,
+                   betas %>% dplyr::select(all_of(i)),
+                   exp_df)
+
+  models <- lapply(genes, function(x){
+      lmer(paste0(i, ' ~ ', x, ' + age + sex + chip_row + plate + (1|flowcell_num)'), data = lm_df)
+  })
+  
+  if (length(models) > 0) {
+  sym <- ens2gene$symbol[match(genes, ens2gene$ensgene)]
+  
+  p <- coef(summary(models[[1]]))[2,5]
+  coef <- coef(summary(models[[1]]))[2,1]
+  if (length(models) > 1) {
+    for(k in 2:length(models)){
+    p <- c(p, coef(summary(models[[k]]))[2,5])
+    coef <- c(coef, coef(summary(models[[k]]))[2,1])
+    }
+  
+  }
+  padj <- p.adjust(p, method = 'fdr')
+  
+  df <- data.frame(
+    cpg = i,
+    gene_sym = sym,
+    gene_ens = genes,
+    coef = coef,
+    p = p,
+    padj = padj
+  )
+  
+  rownames(gene_cpg) <- NULL
+  colnames(gene_cpg) <- c('gene_ens', 'dist')
+  
+  df <- left_join(df, gene_cpg, by = 'gene_ens')
+  print(df)
+  print("************************************")
+  print('')
+  print('************************************')
+  }
+  
+  if (i == names(cpg_range)[1]){
+    df_out <- df
+  } else {
+    df_out <- rbind(df_out, df)
+  }
+}
+
+```
+
+Save 
+
+```{r eval=FALSE}
+write_csv(df_out, file = '../Adi_Data/Coloc/LLS_Adi_geneList-blood.csv')
+```
+
+***

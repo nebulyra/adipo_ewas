@@ -1,0 +1,229 @@
+---
+title: "Adipokine EWAS - Script 9: Sensitivity analyses"
+author: "Lucy Sinke"
+output: html_document
+---
+
+```{r echo=FALSE}
+rm(list=ls())
+```
+
+***
+
+# Setup
+
+Load packages
+
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+library(ggpubr)
+```
+
+***
+
+```{r}
+load("../Adi_Data/Results/Adi_EWAS_Results-Full.Rdata")
+```
+
+***
+
+How many CpGs are significant in the base model (6 cells)
+
+```{r}
+nrow(adi_results %>% filter(base_meta_padj_fdr <= 0.05))
+```
+
+And how many of these are also not heterogenous
+
+```{r}
+nrow(adi_results %>% filter(base_meta_padj_fdr <= 0.05 &
+                              base_het_i2 < 90))
+```
+
+Save
+
+```{r}
+top <- adi_results %>% filter(base_meta_padj_fdr <= 0.05 &
+                              base_het_i2 < 90)
+```
+
+***
+
+# Smoking sensitivity analysis
+
+Inspect
+
+```{r}
+top$ext1_meta_padj_fdr <- p.adjust(top$ext1_meta_p,
+                                     method='fdr')
+nrow(top %>% filter(ext1_meta_padj_fdr <= 0.05))
+```
+
+# Cell counts sensitivity analysis
+
+Inspect
+
+```{r}
+top$ext3_meta_padj_fdr <- p.adjust(top$ext3_meta_p,
+                                     method='fdr')
+nrow(top %>% filter(ext3_meta_padj_fdr <= 0.05))
+
+adi_sens <- top
+```
+
+# Plots
+
+Plot 1a
+
+```{r}
+pdf(file = paste0(root_dir, "Figure_1a.pdf"), width = 6, height = 4, useDingbats = FALSE)
+adi_sens %>% 
+  mutate(sig = ifelse(adi_smoke_padj <= 0.05, "Yes", "No")) %>% 
+  ggplot(aes(x=adi_base_beta, y=adi_smoke_beta)) +
+  geom_abline(color = "#d7d7d4", linetype = "dotted", linewidth = 1) +
+  geom_point(aes(color = sig), size=1.5) +
+  scale_color_manual(values = c("Yes" = "#4f5b86", "No" = "#e57475")) +
+  stat_cor(color = "#4f5b86", label.x = 0.006, label.y = -0.018, size=5, r.digits = 3, r.accuracy = 0.001, p.accuracy = 0.001) +
+  xlim(-0.02, 0.02) + ylim(-0.02, 0.02) +
+  xlab("Adiponectin base model") + ylab("Adjusted for smoking") +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = "none"
+  )
+dev.off()
+```
+
+
+Plot 1b
+
+```{r}
+pdf(file = paste0(root_dir, "Figure_1b.pdf"), width = 6, height = 4, useDingbats = FALSE)
+adi_sens %>% 
+  mutate(sig = ifelse(adi_cells_padj <= 0.05, "Yes", "No")) %>% 
+  ggplot(aes(x=adi_base_beta, y=adi_cells_beta)) +
+  geom_abline(color = "#d7d7d4", linetype = "dotted", linewidth = 1) +
+  geom_point(aes(color = sig), size=1.5) +
+  scale_color_manual(values = c("Yes" = "#4f5b86", "No" = "#e57475")) +
+  stat_cor(color = "#4f5b86", label.x = 0.006, label.y = -0.018, size=5, r.digits = 3, r.accuracy = 0.001, p.accuracy = 0.001) +
+  xlim(-0.02, 0.02) + ylim(-0.02, 0.02) +
+  xlab("Adiponectin base model") + ylab("Adjusted for cell proportions") +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = "none"
+  )
+dev.off()
+```
+
+Plot 1c
+
+```{r}
+pdf(file = paste0(root_dir, "Figure_1c.pdf"), width = 6, height = 4, useDingbats = FALSE)
+adi_sens %>% 
+  mutate(sig = ifelse(adi_bmi_padj <= 0.05, "Yes", "No")) %>% 
+  ggplot(aes(x=adi_base_beta, y=adi_bmi_beta)) +
+  geom_abline(color = "#d7d7d4", linetype = "dotted", linewidth = 1) +
+  geom_point(aes(color = sig), size=1.5) +
+  scale_color_manual(values = c("Yes" = "#4f5b86", "No" = "#e57475")) +
+  stat_cor(color = "#4f5b86", label.x = 0.006, label.y = -0.018, size=5, r.digits = 3, r.accuracy = 0.001, p.accuracy = 0.001) +
+  xlim(-0.02, 0.02) + ylim(-0.02, 0.02) +
+  xlab("Adiponectin base model") + ylab("Adjusted for BMI") +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = "none"
+  )
+dev.off()
+```
+
+Plot 1d
+
+```{r}
+pdf(file = paste0(root_dir, "Figure_1d.pdf"), width = 6, height = 4, useDingbats = FALSE)
+lep_sens %>% 
+  mutate(sig = ifelse(lep_smoke_padj <= 0.05, "Yes", "No")) %>% 
+  ggplot(aes(x=lep_base_beta, y=lep_smoke_beta)) +
+  geom_abline(color = "#d7d7d4", linetype = "dotted", linewidth = 1) +
+  geom_point(aes(color = sig), size=1.5) +
+  scale_color_manual(values = c("Yes" = "#4f5b86", "No" = "#e57475")) +
+  stat_cor(color = "#4f5b86", label.x = 0.006, label.y = -0.018, size=5, r.digits = 3, r.accuracy = 0.001, p.accuracy = 0.001) +
+  xlim(-0.02, 0.02) + ylim(-0.02, 0.02) +
+  xlab("Leptin base model") + ylab("Adjusted for smoking") +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = "none"
+  )
+dev.off()
+```
+
+Plot 1e
+
+```{r}
+pdf(file = paste0(root_dir, "Figure_1e.pdf"), width = 6, height = 4, useDingbats = FALSE)
+lep_sens %>% 
+  mutate(sig = ifelse(lep_cells_padj <= 0.05, "Yes", "No")) %>% 
+  ggplot(aes(x=lep_base_beta, y=lep_cells_beta)) +
+  geom_abline(color = "#d7d7d4", linetype = "dotted", linewidth = 1) +
+  geom_point(aes(color = sig), size=1.5) +
+  scale_color_manual(values = c("Yes" = "#4f5b86", "No" = "#e57475")) +
+  stat_cor(color = "#4f5b86", label.x = 0.006, label.y = -0.018, size=5, r.digits = 3, r.accuracy = 0.001, p.accuracy = 0.001) +
+  xlim(-0.02, 0.02) + ylim(-0.02, 0.02) +
+  xlab("Leptin base model") + ylab("Adjusted for cell proportions") +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = "none"
+  )
+dev.off()
+```
+
+Plot 1f
+
+```{r}
+pdf(file = paste0(root_dir, "Figure_1f.pdf"), width = 6, height = 4, useDingbats = FALSE)
+lep_sens %>%
+  mutate(sig = ifelse(lep_bmi_padj <= 0.05, "Yes", "No")) %>% 
+  ggplot(aes(x=lep_base_beta, y=lep_bmi_beta)) +
+  geom_abline(color = "#d7d7d4", linetype = "dotted", linewidth = 1) +
+  geom_point(aes(color = sig), size=1.5) +
+  scale_color_manual(values = c("Yes" = "#4f5b86", "No" = "#e57475")) +
+  stat_cor(color = "#4f5b86", label.x = 0.006, label.y = -0.018, size=5, r.digits = 3, r.accuracy = 0.001, p.accuracy = 0.001) +
+  xlim(-0.02, 0.02) + ylim(-0.02, 0.02) +
+  xlab("Leptin base model") + ylab("Adjusted for BMI") +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = "none"
+  )
+dev.off()
+```
+
+```{r}
+top <- adi_sens %>% filter(ext1_meta_padj_fdr <= 0.05 & ext3_meta_padj_fdr <= 0.05)
+nrow(top)
+```
+
+```{r}
+save(top, file='../Adi_Data/Results/AdiTop.Rdata')
+```
+

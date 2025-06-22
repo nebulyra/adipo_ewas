@@ -1,5 +1,5 @@
 ---
-title: "An Epigenome-Wide Association Study (EWAS) between Adiponectin and whole blood DNA methylation (DNAm) levels in the Leiden Longevity Study (LLS)"
+title: "Adipokine EWAS - Script 1: Adiponectin EWAS the in Leiden Longevity Study (LLS)"
 author: "Lucy Sinke"
 output: html_document
 ---
@@ -557,8 +557,6 @@ betas <- subset(betas,
 dim(betas)
 ```
 
-This removes 73 individuals, so we have 659 in the main analysis
-
 ***
 
 ### Smoking Sensitivity Analysis
@@ -570,8 +568,6 @@ betas_smoke <- subset(betas,
                       select = rowSums(is.na(colData(betas)[, c(1:14)])) == 0)
 dim(betas_smoke)
 ```
-
-This reduces the sample size to 592
 
 ***
 
@@ -585,8 +581,6 @@ betas_bmi <- subset(betas,
 dim(betas_bmi)
 ```
 
-This model's sample size is 658
-
 ***
 
 ### IDOl Extended Sensitivity Analysis
@@ -598,8 +592,6 @@ betas_idol <- subset(betas,
                      select = rowSums(is.na(colData(betas)[, c(1:13,16)])) == 0)
 dim(betas_idol)
 ```
-
-This model's sample size is 578
 
 ***
 

@@ -1,0 +1,300 @@
+---
+title: "Adipokine EWAS - Script 11: Bidirectional Manhattan plot"
+author: "Lucy Sinke"
+output: html_document
+---
+
+```{r echo=FALSE}
+rm(list=ls())
+```
+
+Load packages
+
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+library(ggrepel)
+library(GenomicRanges)
+```
+
+Load in data
+
+First we load in the data from the IL-6 EWAS. This is the full results.
+
+```{r}
+load("../Adi_Data/Results/Adi_EWAS_Results-Full.Rdata")
+load("../Adi_Data/Results/AdiTop.Rdata")
+```
+
+We will definitely filter out CpGs with evidence of heterogeneity, so we do this first.
+
+```{r}
+# Filter significant with heterogeneity
+Adi_results <- adi_results %>% 
+  filter(base_meta_padj_fdr > 0.05 |
+           (base_meta_padj_fdr <= 0.05 & base_het_i2 < 90))
+Adi_top <- top
+
+dim(Adi_results)
+dim(Adi_top)
+```
+
+Filter out CpGs that were significant but were removed in sensitivity analysis
+
+```{r}
+adi_res <- Adi_results %>% filter(
+  base_meta_padj_fdr > 0.05 | 
+    (base_meta_padj_fdr <= 0.05 & cpg %in% Adi_top$cpg)
+)
+
+dim(adi_res) 
+```
+
+***
+
+```{r}
+adi_res <- adi_res %>% 
+  arrange(chr, pos)
+```
+
+```{r}
+table(adi_res$chr)
+
+adi_full <- data.frame()
+
+for(i in 1:22){
+  adi_sub <- adi_res %>% 
+    filter(chr == i) %>% 
+    mutate(cumulative_position = pos)
+  
+  if(i == 1) {
+    running_total <- max(adi_sub$cumulative_position)
+  } else {
+    adi_sub <- adi_sub %>% 
+      mutate(cumulative_position = cumulative_position + running_total)
+  }
+  
+  running_total <- max(adi_sub$cumulative_position) + 3E7
+  
+  adi_full <- rbind(adi_full, adi_sub)
+}
+```
+
+Make signed log 10 p
+
+```{r}
+adi_full <- adi_full %>% 
+  mutate(signed_logp = ifelse(adi_base_beta < 0, -log10(adi_base_p), log10(adi_base_p)),
+         sig = ifelse(adi_base_padj > 0.05, "No", ifelse(chr %% 2 == 1, "Even", "Odd")))
+
+max(adi_full$signed_logp)
+```
+
+```{r}
+for(i in 1:22){
+  print(paste(i, ":", min((adi_full %>% filter(chr == i))$cumulative_position), "to", max((adi_full %>% filter(chr == i))$cumulative_position), ", median: ",
+              (min((adi_full %>% filter(chr == i))$cumulative_position) + (max((adi_full %>% filter(chr == i))$cumulative_position)) / 2)))
+}
+```
+
+Plot
+
+```{r}
+pdf(file = paste0(root_dir, "Figure_2a.pdf"), width = 12, height = 6, useDingbats = FALSE)
+adi_full %>%
+  ggplot(aes(x=cumulative_position, y = signed_logp)) +
+  geom_rect(aes(xmin = 790667, xmax = 249257764, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #1
+  geom_rect(aes(xmin = 279257764, xmax = 522357769, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #2
+  geom_rect(aes(xmin = 552357769, xmax = 750120200, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #3
+  geom_rect(aes(xmin = 780120200, xmax = 970873841, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #4
+  geom_rect(aes(xmin = 1000873841, xmax = 1181569148, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #5
+  geom_rect(aes(xmin = 1211569148, xmax = 1382341898, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #6
+  geom_rect(aes(xmin = 1412341898, xmax = 1571499788, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #7
+  geom_rect(aes(xmin = 1601499788, xmax = 1747657468, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #8
+  geom_rect(aes(xmin = 1777657468, xmax = 1918697951, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #9
+  geom_rect(aes(xmin = 1948697951, xmax = 2084232045, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #10
+  geom_rect(aes(xmin = 2114232045, xmax = 2249168353, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #11
+  geom_rect(aes(xmin = 2279168353, xmax = 2431962962, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #12
+  geom_rect(aes(xmin = 2461962962, xmax = 2578196816, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #13
+  geom_rect(aes(xmin = 2608196816, xmax = 2717518415, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #14
+  geom_rect(aes(xmin = 2747518415, xmax = 2827597209, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #15
+  geom_rect(aes(xmin = 2857597209, xmax = 2947650910, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #16
+  geom_rect(aes(xmin = 2977650910, xmax = 3058860369, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #17
+  geom_rect(aes(xmin = 3088860369, xmax = 3166975596, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #18
+  geom_rect(aes(xmin = 3196975596, xmax = 3255874403, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #19
+  geom_rect(aes(xmin = 3285874403, xmax = 3359684657, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #20
+  geom_rect(aes(xmin = 3389684657, xmax = 3443863131, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #21
+  geom_rect(aes(xmin = 3473863131, xmax = 3507962760, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #22
+  annotate("text", x = 125024216, y = -33, label = "chr 1", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 400807766, y = -33, label = "2", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 651238984, y = -33, label = "3", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 875497020, y = -33, label = "4", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 1091221494, y = -33, label = "5", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 1296955523, y = -33, label = "6", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 1491920843, y = -33, label = "7", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 1674578628, y = -33, label = "8", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 1848177710, y = -33, label = "9", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2016464998, y = -33, label = "10", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2181700199, y = -33, label = "11", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2355565658, y = -33, label = "12", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2520079889, y = -33, label = "13", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2662857616, y = -33, label = "14", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2787557812, y = -33, label = "15", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2902624060, y = -33, label = "16", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3018255640, y = -33, label = "17", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3127917982, y = -33, label = "18", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3226425000, y = -33, label = "19", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3322779530, y = -33, label = "20", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3490912946, y = -33, label = "22", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3416773894, y = -33, label = "21", hjust = 0.5, vjust = 0.5, size = 3) +
+  geom_point(data = subset(adi_full, sig == "No"),
+             aes(color = sig, size = sig)) +
+  geom_point(data = subset(adi_full, sig != "No"),
+             aes(color = sig, size = sig)) +
+  geom_hline(aes(yintercept = 0), linewidth=0.5) +
+  scale_color_manual(values = c("No" = "#d7d7d4", "Odd" = "#4f5b86", "Even" = "#e57475")) +
+  scale_size_manual(values = c("No" = 0.5, "Odd" = 1.5, "Even" = 1.5)) +
+  xlab("Genomic position") + ylab(bquote("Adiponectin signed log"["10"] * italic(p))) +
+  scale_x_continuous(expand = c(0.01,0.01)) +
+  scale_y_continuous(limits = c(-34,34), breaks = c(-30,-20,-10,0,10,20,30)) +
+  theme(
+    axis.text.y = element_text(size = 11),
+    axis.text.x = element_blank(),
+    axis.title = element_text(size = 13),
+    axis.ticks.x = element_blank(),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.line.y = element_line(color = "black"),
+    axis.line.x = element_blank(),
+    legend.position = "none"
+  )
+dev.off()
+```
+
+Png file
+
+```{r}
+png(file = paste0(root_dir, "Figure_2a.png"), width = 2400, height = 1500, res = 300)
+adi_full %>%
+  ggplot(aes(x=cumulative_position, y = signed_logp)) +
+  geom_rect(aes(xmin = 790667, xmax = 249257764, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #1
+  geom_rect(aes(xmin = 279257764, xmax = 522357769, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #2
+  geom_rect(aes(xmin = 552357769, xmax = 750120200, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #3
+  geom_rect(aes(xmin = 780120200, xmax = 970873841, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #4
+  geom_rect(aes(xmin = 1000873841, xmax = 1181569148, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #5
+  geom_rect(aes(xmin = 1211569148, xmax = 1382341898, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #6
+  geom_rect(aes(xmin = 1412341898, xmax = 1571499788, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #7
+  geom_rect(aes(xmin = 1601499788, xmax = 1747657468, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #8
+  geom_rect(aes(xmin = 1777657468, xmax = 1918697951, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #9
+  geom_rect(aes(xmin = 1948697951, xmax = 2084232045, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #10
+  geom_rect(aes(xmin = 2114232045, xmax = 2249168353, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #11
+  geom_rect(aes(xmin = 2279168353, xmax = 2431962962, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #12
+  geom_rect(aes(xmin = 2461962962, xmax = 2578196816, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #13
+  geom_rect(aes(xmin = 2608196816, xmax = 2717518415, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #14
+  geom_rect(aes(xmin = 2747518415, xmax = 2827597209, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #15
+  geom_rect(aes(xmin = 2857597209, xmax = 2947650910, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #16
+  geom_rect(aes(xmin = 2977650910, xmax = 3058860369, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #17
+  geom_rect(aes(xmin = 3088860369, xmax = 3166975596, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #18
+  geom_rect(aes(xmin = 3196975596, xmax = 3255874403, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #19
+  geom_rect(aes(xmin = 3285874403, xmax = 3359684657, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #20
+  geom_rect(aes(xmin = 3389684657, xmax = 3443863131, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #21
+  geom_rect(aes(xmin = 3473863131, xmax = 3507962760, ymin = -32, ymax = 32), color = "#f7f1e4", fill="white", linewidth=0.5) + #22
+  annotate("text", x = 125024216, y = -33, label = "chr 1", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 400807766, y = -33, label = "2", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 651238984, y = -33, label = "3", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 875497020, y = -33, label = "4", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 1091221494, y = -33, label = "5", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 1296955523, y = -33, label = "6", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 1491920843, y = -33, label = "7", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 1674578628, y = -33, label = "8", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 1848177710, y = -33, label = "9", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2016464998, y = -33, label = "10", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2181700199, y = -33, label = "11", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2355565658, y = -33, label = "12", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2520079889, y = -33, label = "13", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2662857616, y = -33, label = "14", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2787557812, y = -33, label = "15", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 2902624060, y = -33, label = "16", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3018255640, y = -33, label = "17", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3127917982, y = -33, label = "18", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3226425000, y = -33, label = "19", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3322779530, y = -33, label = "20", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3490912946, y = -33, label = "22", hjust = 0.5, vjust = 0.5, size = 3) +
+  annotate("text", x = 3416773894, y = -33, label = "21", hjust = 0.5, vjust = 0.5, size = 3) +
+  geom_point(data = subset(adi_full, sig == "No"),
+             aes(color = sig, size = sig)) +
+  geom_point(data = subset(adi_full, sig != "No"),
+             aes(color = sig, size = sig)) +
+  geom_hline(aes(yintercept = 0), linewidth=0.5) +
+  scale_color_manual(values = c("No" = "#d7d7d4", "Odd" = "#4f5b86", "Even" = "#e57475")) +
+  scale_size_manual(values = c("No" = 0.5, "Odd" = 1.5, "Even" = 1.5)) +
+  xlab("Genomic position") + ylab(bquote("Adiponectin signed log"["10"] * italic(p))) +
+  scale_x_continuous(expand = c(0.01,0.01)) +
+  scale_y_continuous(limits = c(-34,34), breaks = c(-30,-20,-10,0,10,20,30)) +
+  theme(
+    axis.text.y = element_text(size = 11),
+    axis.text.x = element_blank(),
+    axis.title = element_text(size = 13),
+    axis.ticks.x = element_blank(),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.line.y = element_line(color = "black"),
+    axis.line.x = element_blank(),
+    legend.position = "none"
+  )
+dev.off()
+```
+
+Comparing both adipokines
+
+```{r}
+adi_cpgs <- unique((adi_sens %>% 
+  filter(adi_base_padj <= 0.05 & adi_smoke_padj <= 0.05 & adi_cells_padj <= 0.05 & adi_bmi_padj <= 0.05))$cpg)
+
+lep_cpgs <- unique((lep_sens %>% 
+  filter(lep_base_padj <= 0.05 & lep_smoke_padj <= 0.05 & lep_cells_padj <= 0.05 & lep_bmi_padj <= 0.05))$cpg)
+
+both_cpgs <- adi_cpgs[adi_cpgs %in% lep_cpgs]
+```
+
+Data frame with both effect sizes
+
+```{r}
+both_df <- adi_full %>% 
+  filter(cpg %in% c(adi_cpgs, lep_cpgs)) %>% 
+  dplyr::select(cpg, adi_base_beta)
+
+both_df <- full_join(both_df, (lep_full %>% 
+  filter(cpg %in% c(adi_cpgs, lep_cpgs)) %>% 
+  dplyr::select(cpg, lep_base_beta)), by="cpg")
+
+both_df <- both_df %>% 
+  mutate(type = case_when(
+    cpg %in% both_cpgs ~ "Both",
+    cpg %in% adi_cpgs ~ "Adiponectin",
+    cpg %in% lep_cpgs ~ "Leptin"
+  ))
+```
+
+Plot
+
+```{r}
+pdf(file = paste0(root_dir, "Figure_3a.pdf"), width = 10, height = 6, useDingbats = FALSE)
+both_df %>% 
+  ggplot(aes(x=adi_base_beta, y = lep_base_beta)) +
+  geom_abline(slope = -1,color = "#d7d7d4", linetype = "dotted", linewidth = 1) +
+  geom_point(data = subset(both_df, type != "Both"), aes(color = type), size=2) +
+  geom_point(data = subset(both_df, type == "Both"), aes(color = type), size=2) +
+  xlab("Adiponectin EWAS effect size") + ylab("Leptin EWAS effect size") +
+  scale_color_manual(values = c("Adiponectin" = "#4f5b86", "Both" = "#e57475", "Leptin" = "#f0dec5")) +
+  xlim(-0.02, 0.02) + ylim(-0.02, 0.02) +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = c(0.9, 0.9),
+    legend.title = element_blank(),
+    legend.text = element_text(size=12))
+dev.off()
+```

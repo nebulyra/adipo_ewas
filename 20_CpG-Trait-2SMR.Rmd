@@ -1,0 +1,624 @@
+---
+title: "Adipokine EWAS - Script 20: Trait-CpG 2SMR"
+author: "Lucy Sinke"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(TwoSampleMR)
+library(ieugwasr)
+```
+
+Load CpG exposure data (cis mQTLs)
+
+```{r}
+cpg02_exp <- read_csv('cg02235049.csv')
+cpg02_exp <- cpg02_exp %>% 
+  separate(name, into=c('chr', 'pos', 'type'), sep=':') %>% 
+  mutate(chr = sub('chr', '', chr)) %>% 
+  select(chr.exposure = chr,
+         pos.exposure = pos,
+         beta.exposure = beta_a1, 
+         se.exposure = se, 
+         pval.exposure = pval,
+         samplesize.exposure = samplesize,
+         SNP=rsid,
+         effect_allele.exposure = a1, 
+         other_allele.exposure = a2) %>% 
+  mutate(id.exposure = 'cg02235049',
+         exposure = 'cg02235049',
+         eaf.exposure = 0.9)
+
+cpg18_exp <- read_csv('cg11851174.csv')
+cpg18_exp <- cpg18_exp %>% 
+  separate(name, into=c('chr', 'pos', 'type'), sep=':') %>% 
+  mutate(chr = sub('chr', '', chr)) %>% 
+  select(chr.exposure = chr,
+         pos.exposure = pos,
+         beta.exposure = beta_a1, 
+         se.exposure = se, 
+         pval.exposure = pval,
+         samplesize.exposure = samplesize,
+         SNP=rsid,
+         effect_allele.exposure = a1, 
+         other_allele.exposure = a2) %>% 
+  mutate(id.exposure = 'cg11851174',
+         exposure = 'cg11851174',
+         eaf.exposure = 0.9)
+```
+
+```{r}
+bmi_exp <- extract_instruments(outcomes = 'ieu-b-40')
+t2d_exp <- extract_instruments(outcomes = 'ebi-a-GCST006867')
+tg_exp <- extract_instruments(outcomes = 'ieu-b-111')
+hdl_exp <- extract_instruments(outcomes = 'ieu-b-109')
+ins_exp <- extract_instruments(outcomes = 'ebi-a-GCST90002238')
+```
+
+Load full mQTL data
+
+```{r}
+load('cg02235049.Rdata')
+mqtl_cg02 <- mqtl_dat
+
+load('cg11851174.Rdata')
+mqtl_cg18 <- mqtl_dat
+```
+
+***
+
+# CpG 02 and BMI
+
+We have to query 10 at a time due to limits on API calls now 
+
+```{r}
+cpg02_bmi_0 <- associations(variants = cpg02_exp$SNP[1:9], id = c("ieu-b-40"), proxies = 0)
+cpg02_bmi_1 <- associations(variants = cpg02_exp$SNP[10:19], id = c("ieu-b-40"), proxies = 0)
+cpg02_bmi_2 <- associations(variants = cpg02_exp$SNP[20:29], id = c("ieu-b-40"), proxies = 0)
+cpg02_bmi_3 <- associations(variants = cpg02_exp$SNP[30:39], id = c("ieu-b-40"), proxies = 0)
+cpg02_bmi_4 <- associations(variants = cpg02_exp$SNP[40:49], id = c("ieu-b-40"), proxies = 0)
+cpg02_bmi_5 <- associations(variants = cpg02_exp$SNP[50:57], id = c("ieu-b-40"), proxies = 0)
+
+cpg02_bmi <- rbind(cpg02_bmi_1, cpg02_bmi_2, cpg02_bmi_3, cpg02_bmi_4, cpg02_bmi_5)
+
+bmi_cpg02 <- mqtl_cg02 %>% 
+  filter(SNP %in% bmi_exp$SNP) %>% 
+  select(SNP,
+         chr=CHR,
+         pos=POS,
+         beta.outcome = BETA,
+         se.outcome = SE,
+         samplesize.outcome = N,
+         pval.outcome = PVAL,
+         eaf.outcome = MAF,
+         effect_allele.outcome = A1,
+         other_allele.outcome = A2) %>% 
+  mutate(eaf.outcome = 1-eaf.outcome,
+         outcome = 'cg02235049',
+         id.outcome = outcome)
+```
+
+
+CpG 02 > BMI
+
+```{r}
+cpg02_bmi <- cpg02_bmi %>% 
+  dplyr::select(SNP=rsid, id.outcome = id, outcome = trait, beta.outcome = beta, se.outcome = se, effect_allele.outcome = ea, other_allele.outcome = nea, chr, position, eaf.outcome = eaf, p.outcome = p, n.outcome = n)
+
+dat <- harmonise_data(
+  exposure_dat = cpg02_exp,
+  outcome_dat = cpg02_bmi
+)
+
+res <- mr(dat)
+res
+```
+
+BMI > CpG 02
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat = bmi_exp,
+  outcome_dat = bmi_cpg02
+)
+
+res <- mr(dat)
+res
+```
+
+
+# CpG 02 and TG
+
+```{r}
+cpg02_tg_0 <- associations(variants = cpg02_exp$SNP[1:9], id = c("ieu-b-111"), proxies = 0)
+cpg02_tg_1 <- associations(variants = cpg02_exp$SNP[10:19], id = c("ieu-b-111"), proxies = 0)
+cpg02_tg_2 <- associations(variants = cpg02_exp$SNP[20:29], id = c("ieu-b-111"), proxies = 0)
+cpg02_tg_3 <- associations(variants = cpg02_exp$SNP[30:39], id = c("ieu-b-111"), proxies = 0)
+cpg02_tg_4 <- associations(variants = cpg02_exp$SNP[40:49], id = c("ieu-b-111"), proxies = 0)
+cpg02_tg_5 <- associations(variants = cpg02_exp$SNP[50:57], id = c("ieu-b-111"), proxies = 0)
+
+cpg02_tg <- rbind(cpg02_tg_0, cpg02_tg_1, cpg02_tg_2, cpg02_tg_3, cpg02_tg_4, cpg02_tg_5)
+
+tg_cpg02 <- mqtl_cg02 %>% 
+  filter(SNP %in% tg_exp$SNP) %>% 
+  select(SNP,
+         chr=CHR,
+         pos=POS,
+         beta.outcome = BETA,
+         se.outcome = SE,
+         samplesize.outcome = N,
+         pval.outcome = PVAL,
+         eaf.outcome = MAF,
+         effect_allele.outcome = A1,
+         other_allele.outcome = A2) %>% 
+  mutate(eaf.outcome = 1-eaf.outcome,
+         outcome = 'cg02235049',
+         id.outcome = outcome)
+```
+
+
+CpG 02 > TG
+
+```{r}
+cpg02_tg <- cpg02_tg %>% 
+  dplyr::select(SNP=rsid, id.outcome = id, outcome = trait, beta.outcome = beta, se.outcome = se, effect_allele.outcome = ea, other_allele.outcome = nea, chr, position, eaf.outcome = eaf, p.outcome = p, n.outcome = n)
+
+
+dat <- harmonise_data(
+  exposure_dat = cpg02_exp,
+  outcome_dat = cpg02_tg
+)
+
+res <- mr(dat)
+res
+```
+
+TG > CpG 02
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat = tg_exp,
+  outcome_dat = tg_cpg02
+)
+
+res <- mr(dat)
+res
+```
+
+
+# CpG 02 and HDL
+
+```{r}
+cpg02_hdl_0 <- associations(variants = cpg02_exp$SNP[1:9], id = c("ieu-b-109"), proxies = 0)
+cpg02_hdl_1 <- associations(variants = cpg02_exp$SNP[10:19], id = c("ieu-b-109"), proxies = 0)
+cpg02_hdl_2 <- associations(variants = cpg02_exp$SNP[20:29], id = c("ieu-b-109"), proxies = 0)
+cpg02_hdl_3 <- associations(variants = cpg02_exp$SNP[30:39], id = c("ieu-b-109"), proxies = 0)
+cpg02_hdl_4 <- associations(variants = cpg02_exp$SNP[40:49], id = c("ieu-b-109"), proxies = 0)
+cpg02_hdl_5 <- associations(variants = cpg02_exp$SNP[50:57], id = c("ieu-b-109"), proxies = 0)
+
+cpg02_hdl <- rbind(cpg02_hdl_0, cpg02_hdl_1, cpg02_hdl_2, cpg02_hdl_3, cpg02_hdl_4, cpg02_hdl_5)
+
+hdl_cpg02 <- mqtl_cg02 %>% 
+  filter(SNP %in% hdl_exp$SNP) %>% 
+  select(SNP,
+         chr=CHR,
+         pos=POS,
+         beta.outcome = BETA,
+         se.outcome = SE,
+         samplesize.outcome = N,
+         pval.outcome = PVAL,
+         eaf.outcome = MAF,
+         effect_allele.outcome = A1,
+         other_allele.outcome = A2) %>% 
+  mutate(eaf.outcome = 1-eaf.outcome,
+         outcome = 'cg02235049',
+         id.outcome = outcome)
+```
+
+
+CpG 02 > HDL
+
+```{r}
+cpg02_hdl <- cpg02_hdl %>% 
+  dplyr::select(SNP=rsid, id.outcome = id, outcome = trait, beta.outcome = beta, se.outcome = se, effect_allele.outcome = ea, other_allele.outcome = nea, chr, position, eaf.outcome = eaf, p.outcome = p, n.outcome = n)
+
+dat <- harmonise_data(
+  exposure_dat = cpg02_exp,
+  outcome_dat = cpg02_hdl
+)
+
+res <- mr(dat)
+res
+```
+
+HDL > CpG 02
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat = hdl_exp,
+  outcome_dat = hdl_cpg02
+)
+
+res <- mr(dat)
+res
+```
+
+
+
+# CpG 02 and T2D
+
+```{r}
+cpg02_t2d_0 <- associations(variants = cpg02_exp$SNP[1:9], id = c("ebi-a-GCST006867"), proxies = 0)
+cpg02_t2d_1 <- associations(variants = cpg02_exp$SNP[10:19], id = c("ebi-a-GCST006867"), proxies = 0)
+cpg02_t2d_2 <- associations(variants = cpg02_exp$SNP[20:29], id = c("ebi-a-GCST006867"), proxies = 0)
+cpg02_t2d_3 <- associations(variants = cpg02_exp$SNP[30:39], id = c("ebi-a-GCST006867"), proxies = 0)
+cpg02_t2d_4 <- associations(variants = cpg02_exp$SNP[40:49], id = c("ebi-a-GCST006867"), proxies = 0)
+cpg02_t2d_5 <- associations(variants = cpg02_exp$SNP[50:57], id = c("ebi-a-GCST006867"), proxies = 0)
+
+cpg02_t2d <- rbind(cpg02_t2d_0, cpg02_t2d_1, cpg02_t2d_2, cpg02_t2d_3, cpg02_t2d_4, cpg02_t2d_5)
+
+t2d_cpg02 <- mqtl_cg02 %>% 
+  filter(SNP %in% t2d_exp$SNP) %>% 
+  select(SNP,
+         chr=CHR,
+         pos=POS,
+         beta.outcome = BETA,
+         se.outcome = SE,
+         samplesize.outcome = N,
+         pval.outcome = PVAL,
+         eaf.outcome = MAF,
+         effect_allele.outcome = A1,
+         other_allele.outcome = A2) %>% 
+  mutate(eaf.outcome = 1-eaf.outcome,
+         outcome = 'cg02235049',
+         id.outcome = outcome)
+```
+
+
+CpG 02 > T2D
+
+```{r}
+cpg02_t2d <- cpg02_t2d %>% 
+  dplyr::select(SNP=rsid, id.outcome = id, outcome = trait, beta.outcome = beta, se.outcome = se, effect_allele.outcome = ea, other_allele.outcome = nea, chr, position, eaf.outcome = eaf, p.outcome = p, n.outcome = n)
+
+dat <- harmonise_data(
+  exposure_dat = cpg02_exp,
+  outcome_dat = cpg02_t2d
+)
+
+res <- mr(dat)
+res
+```
+
+T2D > CpG 02
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat = t2d_exp,
+  outcome_dat = t2d_cpg02
+)
+
+res <- mr(dat)
+res
+```
+
+
+
+
+# CpG 02 and Insulin
+
+```{r}
+cpg02_ins_0 <- associations(variants = cpg02_exp$SNP[1:9], id = c("ebi-a-GCST90002238"), proxies = 0)
+cpg02_ins_1 <- associations(variants = cpg02_exp$SNP[10:19], id = c("ebi-a-GCST90002238"), proxies = 0)
+cpg02_ins_2 <- associations(variants = cpg02_exp$SNP[20:29], id = c("ebi-a-GCST90002238"), proxies = 0)
+cpg02_ins_3 <- associations(variants = cpg02_exp$SNP[30:39], id = c("ebi-a-GCST90002238"), proxies = 0)
+cpg02_ins_4 <- associations(variants = cpg02_exp$SNP[40:49], id = c("ebi-a-GCST90002238"), proxies = 0)
+cpg02_ins_5 <- associations(variants = cpg02_exp$SNP[50:57], id = c("ebi-a-GCST90002238"), proxies = 0)
+
+cpg02_ins <- rbind(cpg02_ins_0, cpg02_ins_1, cpg02_ins_2, cpg02_ins_3, cpg02_ins_4, cpg02_ins_5)
+
+ins_cpg02 <- mqtl_cg02 %>% 
+  filter(SNP %in% ins_exp$SNP) %>% 
+  select(SNP,
+         chr=CHR,
+         pos=POS,
+         beta.outcome = BETA,
+         se.outcome = SE,
+         samplesize.outcome = N,
+         pval.outcome = PVAL,
+         eaf.outcome = MAF,
+         effect_allele.outcome = A1,
+         other_allele.outcome = A2) %>% 
+  mutate(eaf.outcome = 1-eaf.outcome,
+         outcome = 'cg02235049',
+         id.outcome = outcome)
+```
+
+
+CpG 02 > Insulin
+
+```{r}
+cpg02_ins <- cpg02_ins %>% 
+  dplyr::select(SNP=rsid, id.outcome = id, outcome = trait, beta.outcome = beta, se.outcome = se, effect_allele.outcome = ea, other_allele.outcome = nea, chr, position, eaf.outcome = eaf, p.outcome = p, n.outcome = n)
+
+dat <- harmonise_data(
+  exposure_dat = cpg02_exp,
+  outcome_dat = cpg02_ins
+)
+
+res <- mr(dat)
+res
+```
+
+Insulin > CpG 02
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat = ins_exp,
+  outcome_dat = ins_cpg02
+)
+
+res <- mr(dat)
+res
+```
+
+***
+
+# CpG 18
+
+# CpG 18 and BMI
+
+```{r}
+cpg18_bmi <- associations(variants = cpg18_exp$SNP, id = c("ieu-b-40"), proxies = 0)
+
+bmi_cpg18 <- mqtl_cg18 %>% 
+  filter(SNP %in% bmi_exp$SNP) %>% 
+  select(SNP,
+         chr=CHR,
+         pos=POS,
+         beta.outcome = BETA,
+         se.outcome = SE,
+         samplesize.outcome = N,
+         pval.outcome = PVAL,
+         eaf.outcome = MAF,
+         effect_allele.outcome = A1,
+         other_allele.outcome = A2) %>% 
+  mutate(eaf.outcome = 1-eaf.outcome,
+         outcome = 'cg11851174',
+         id.outcome = outcome)
+```
+
+CpG 18 > BMI
+
+```{r}
+cpg18_bmi <- cpg18_bmi %>% 
+  dplyr::select(SNP=rsid, id.outcome = id, outcome = trait, beta.outcome = beta, se.outcome = se, effect_allele.outcome = ea, other_allele.outcome = nea, chr, position, eaf.outcome = eaf, p.outcome = p, n.outcome = n)
+
+dat <- harmonise_data(
+  exposure_dat = cpg18_exp,
+  outcome_dat = cpg18_bmi
+)
+
+res <- mr(dat)
+res
+```
+
+BMI > CpG 18
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat = bmi_exp,
+  outcome_dat = bmi_cpg18
+)
+
+res <- mr(dat)
+res
+```
+
+
+## CpG 18 and TG
+
+```{r}
+cpg18_tg <- associations(variants = cpg18_exp$SNP, id = c("ieu-b-111"), proxies = 0)
+
+tg_cpg18 <- mqtl_cg18 %>% 
+  filter(SNP %in% tg_exp$SNP) %>% 
+  select(SNP,
+         chr=CHR,
+         pos=POS,
+         beta.outcome = BETA,
+         se.outcome = SE,
+         samplesize.outcome = N,
+         pval.outcome = PVAL,
+         eaf.outcome = MAF,
+         effect_allele.outcome = A1,
+         other_allele.outcome = A2) %>% 
+  mutate(eaf.outcome = 1-eaf.outcome,
+         outcome = 'cg11851174',
+         id.outcome = outcome)
+```
+
+
+CpG 18 > TG
+
+```{r}
+cpg18_tg <- cpg18_tg %>% 
+  dplyr::select(SNP=rsid, id.outcome = id, outcome = trait, beta.outcome = beta, se.outcome = se, effect_allele.outcome = ea, other_allele.outcome = nea, chr, position, eaf.outcome = eaf, p.outcome = p, n.outcome = n)
+
+
+dat <- harmonise_data(
+  exposure_dat = cpg18_exp,
+  outcome_dat = cpg18_tg
+)
+
+res <- mr(dat)
+res
+```
+
+TG > CpG 18
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat = tg_exp,
+  outcome_dat = tg_cpg18
+)
+
+res <- mr(dat)
+res
+```
+
+
+# CpG 18 and HDL
+
+```{r}
+cpg18_hdl <- associations(variants = cpg18_exp$SNP, id = c("ieu-b-109"), proxies = 0)
+
+hdl_cpg18 <- mqtl_cg18 %>% 
+  filter(SNP %in% hdl_exp$SNP) %>% 
+  select(SNP,
+         chr=CHR,
+         pos=POS,
+         beta.outcome = BETA,
+         se.outcome = SE,
+         samplesize.outcome = N,
+         pval.outcome = PVAL,
+         eaf.outcome = MAF,
+         effect_allele.outcome = A1,
+         other_allele.outcome = A2) %>% 
+  mutate(eaf.outcome = 1-eaf.outcome,
+         outcome = 'cg11851174',
+         id.outcome = outcome)
+```
+
+
+CpG 18 > HDL
+
+```{r}
+cpg18_hdl <- cpg18_hdl %>% 
+  dplyr::select(SNP=rsid, id.outcome = id, outcome = trait, beta.outcome = beta, se.outcome = se, effect_allele.outcome = ea, other_allele.outcome = nea, chr, position, eaf.outcome = eaf, p.outcome = p, n.outcome = n)
+
+dat <- harmonise_data(
+  exposure_dat = cpg18_exp,
+  outcome_dat = cpg18_hdl
+)
+
+res <- mr(dat)
+res
+```
+
+HDL > CpG 18
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat = hdl_exp,
+  outcome_dat = hdl_cpg18
+)
+
+res <- mr(dat)
+res
+```
+
+
+## CpG 18 and T2D
+
+```{r}
+cpg18_t2d <- associations(variants = cpg18_exp$SNP, id = c("ebi-a-GCST006867"), proxies = 0)
+
+t2d_cpg18 <- mqtl_cg18 %>% 
+  filter(SNP %in% t2d_exp$SNP) %>% 
+  select(SNP,
+         chr=CHR,
+         pos=POS,
+         beta.outcome = BETA,
+         se.outcome = SE,
+         samplesize.outcome = N,
+         pval.outcome = PVAL,
+         eaf.outcome = MAF,
+         effect_allele.outcome = A1,
+         other_allele.outcome = A2) %>% 
+  mutate(eaf.outcome = 1-eaf.outcome,
+         outcome = 'cg11851174',
+         id.outcome = outcome)
+```
+
+
+CpG 18 > T2D
+
+```{r}
+cpg18_t2d <- cpg18_t2d %>% 
+  dplyr::select(SNP=rsid, id.outcome = id, outcome = trait, beta.outcome = beta, se.outcome = se, effect_allele.outcome = ea, other_allele.outcome = nea, chr, position, eaf.outcome = eaf, p.outcome = p, n.outcome = n)
+
+dat <- harmonise_data(
+  exposure_dat = cpg18_exp,
+  outcome_dat = cpg18_t2d
+)
+
+res <- mr(dat)
+res
+```
+
+T2D > CpG 18
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat = t2d_exp,
+  outcome_dat = t2d_cpg18
+)
+
+res <- mr(dat)
+res
+```
+
+
+
+## CpG 18 and Insulin
+
+```{r}
+cpg18_ins <- associations(variants = cpg18_exp$SNP, id = c("ebi-a-GCST90002238"), proxies = 0)
+
+ins_cpg18 <- mqtl_cg18 %>% 
+  filter(SNP %in% ins_exp$SNP) %>% 
+  select(SNP,
+         chr=CHR,
+         pos=POS,
+         beta.outcome = BETA,
+         se.outcome = SE,
+         samplesize.outcome = N,
+         pval.outcome = PVAL,
+         eaf.outcome = MAF,
+         effect_allele.outcome = A1,
+         other_allele.outcome = A2) %>% 
+  mutate(eaf.outcome = 1-eaf.outcome,
+         outcome = 'cg11851174',
+         id.outcome = outcome)
+```
+
+
+CpG 18 > Insulin
+
+```{r}
+cpg18_ins <- cpg18_ins %>% 
+  dplyr::select(SNP=rsid, id.outcome = id, outcome = trait, beta.outcome = beta, se.outcome = se, effect_allele.outcome = ea, other_allele.outcome = nea, chr, position, eaf.outcome = eaf, p.outcome = p, n.outcome = n)
+
+dat <- harmonise_data(
+  exposure_dat = cpg18_exp,
+  outcome_dat = cpg18_ins
+)
+
+res <- mr(dat)
+res
+```
+
+Insulin > CpG 18
+
+```{r}
+dat <- harmonise_data(
+  exposure_dat = ins_exp,
+  outcome_dat = ins_cpg18
+)
+
+res <- mr(dat)
+res
+```
+

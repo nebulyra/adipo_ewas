@@ -1,0 +1,238 @@
+---
+title: "Adipokine EWAS - Script 19: Validation of ADIPOQ CpGs in adipocytes"
+author: "Lucy Sinke"
+output: html_document
+---
+
+# Setup
+
+Clean environment:
+
+```{r clean}
+rm(list=ls())
+```
+
+Load packages:
+
+```{r}
+library(GEOquery)
+library(tidyverse)
+library(ggpubr)
+library(lme4)
+library(lmerTest)
+```
+
+***
+
+# Data
+
+Publicly available data from Simpson-Golabi-Behmel syndrome (SGBS) euploid progenitor cells was used to experimentally validate links between two CpG sites and expression of ADIPOQ and SREBF1 in adipocytes.
+The original paper ([Tini et al, 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7691080/)) investigated links between DNA methylation during adipogenesis and the impact of fructose.
+
+## Expression data
+
+First we load the expression data from GEO ([GSE119593](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE119593)) as an `ExpressionSet` object.
+Expression was profiled using the Illumina HumanHT-12 V4.0 expression beadchip array.
+
+```{r}
+expData <- getGEO("GSE119593", GSEMatrix=T, getGPL=T)[[1]]
+```
+
+***
+
+The full expression data is extracted and saved as a data frame:
+
+```{r}
+countData <- as.data.frame(expData@assayData$exprs)
+```
+
+***
+
+Probe annotation is available as `featureData`, and can be used to extract relevant probes for ADIPOQ and SREBF1:
+
+* ADIPOQ is measured by probe ID `ILMN_1775045`
+
+```{r}
+expData@featureData@data %>% 
+  filter(grepl("ADIPOQ", ILMN_Gene))
+```
+
+***
+
+Sample metaData is extracted and the following columns saved:
+
+* `sample_ID`: ID of the sample (previously `title`)
+* `geo_accession`: Accession ID on GEO (different for DNAm and expression from the same sample)
+* `cell_line`: SGBS preadipocyte cell for all samples (previously `cell_line:ch1`)
+* `time`: timepoint (0, 24, 48, 96, 192, or 384 hours; previously `time:ch1`
+* `conc_amt`: concentration of glucose or fructose (in mM; previously in `treatment:ch1`)
+* `exposure`: fructose or glucose; previously in `treatment:ch1`)
+* `rep`: replicate number (rep1, rep2, or rep3; previously contained in `description`)
+
+Other details from the metaData:
+
+* Fructose doses were based on reports found in the systemic circulation following exposure to fructose-rich food. At the initiation of differentiation, 2.5, 5 and 10 mM fructose or 5mM of glucose concentrations were added and maintained in the medium until the collection of cells and medium at end points of either 192 hours or until 384 hours of differentiation. Differentiation and maintenance of adipocytes contained a basal amount of 5 mM glucose, equivalent to the normal blood glucose concentration. Cells were fully differentiated by 192 hours (by oil red O staining, not shown). Cells for RNA and DNA isolations were collected at 24, 48, 96, 192 and 384 hours post induction (0 hr). Fructose doses were based on reports found in the systemic circulation following exposure to fructose-rich food. At the initiation of differentiation, 2.5, 5 and 10 mM fructose concentrations were added and maintained in the medium until the collection of cells and medium at end points of either 192 hours or until 384 hours of differentiation.
+* SGBS preadipocytes were plated at 2x105 cells in 100 mm dishes, supplemented with 10 ml growth medium, grown to confluence and initiated to differentiate as per. All media used for the growth, differentiation and maintenance of adipocytes contained a basal amount of 5 mM glucose, equivalent to the normal blood glucose concentration. Cells were fully differentiated by 192 hours (by oil red O staining, not shown). Cells for RNA and DNA isolations were collected at 24, 48, 96, 192 and 384 hours post induction (0 hr).
+* For RNA isolation, media was completely aspirated from cells and a total of 700 ul of QIAzol lysis reagent was added to the cells, and the lysed cells were scraped, collected in an Eppendorf vial, sheer disrupted by passing through a tuberculin syringe about 6 time, and the lysates flash frozen.
+* Beadchips were scanned using Illumina BeadScan image data acquisition software.
+* The scanned data was acquired in R using the package illiminaio. The non-normalized summarized bead-level data was then annotated with R package illuminaHumanv4.db.
+
+```{r}
+metaData_exp <- as.data.frame(expData@phenoData@data)
+metaData_exp <- metaData_exp %>% 
+  separate(description, into = c(NA, NA, "rep"), sep = ", ", remove = T) %>% 
+  separate(`treatment:ch1`, into = c("conc_amt", NA, NA, "exposure"), sep = " ", remove = T) %>% 
+  mutate(rep = sub("Replicate ", "rep", rep),
+         time = as.numeric(sub(" hours", "", `time:ch1`)),
+         conc_amt = as.numeric(conc_amt)) %>% 
+  select(sample_ID = title, geo_accession,
+         cell_line = `cell line:ch1`, time, conc_amt, exposure, rep)
+```
+
+***
+
+# DNA methylation data
+
+Next, we load the DNAm data from GEO ([GSE119539](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE119539)) as an `ExpressionSet` object.
+
+```{r}
+methData <- getGEO("GSE119539", GSEMatrix =TRUE, getGPL=FALSE)[[1]]
+```
+
+***
+
+The full DNAm data is extracted and saved as a data frame:
+
+```{r}
+betaData <- as.data.frame(methData@assayData$exprs)
+```
+
+***
+
+Sample metaData is extracted and the following columns saved (others are located in the expression metaData):
+
+* `sample_ID`: ID of the sample (previously `title`)
+* `geo_accession`: Accession ID on GEO (different for DNAm and expression from the same sample)
+
+Other details from the metaData:
+
+* For obtaining samples for DNA isolation, media was removed and cells were washed with PBS and aspirated to remove all PBS. The cells were gently scraped in the presence of a total of 400 ul of PBS, collected using a pipette fitted with a wide mouth tip, transferred to an eppendorf vial, and flash frozen.
+* Preprocessing was performed with the function preprocessIllumina from the R package Minfi. This method was applied to reduce Infinium I/II type bias and correct for background. Absolute percentages of methylation (β-values) were then extracted and normalized with SWAN method. For each CpG site, averaged β-values across the cell triplicates were considered for the following analysis.
+
+```{r}
+metaData_dnam <- as.data.frame(methData@phenoData@data)
+
+metaData_dnam <- metaData_dnam %>% 
+  select(sample_ID = title, geo_accession)
+```
+
+Metadata from both was merged:
+
+```{r}
+metaData <- full_join(metaData_dnam %>% select(-geo_accession), metaData_exp %>% select(-geo_accession), by = "sample_ID")
+```
+
+***
+
+# Wrangling
+
+The data on relevant CpGs and genes is added to the metaData for analysis:
+
+First, cg11851174 and cg02235049 beta values:
+
+```{r}
+cpg_data <- as.data.frame(t(betaData[c("cg11851174", "cg02235049"), ])) %>% 
+  rownames_to_column(var = "geo_accession") %>% 
+  left_join(y = metaData_dnam, by = "geo_accession") %>% 
+  select(-geo_accession)
+
+metaData <- full_join(metaData, cpg_data, by = "sample_ID")
+```
+
+***
+
+Count data is normalized to log2CPM values:
+
+```{r}
+cpmData <- log2(countData / colSums(countData) * 1E6)
+```
+
+Then, the expression probes are extracted:
+
+```{r}
+gene_data <- as.data.frame(t(cpmData[c("ILMN_1775045", "ILMN_1663035", "ILMN_1695378", "ILMN_2328986"), ])) %>%  
+  rownames_to_column(var = "geo_accession") %>% 
+  left_join(y = metaData_exp, by = "geo_accession") %>% 
+  select(ADIPOQ = ILMN_1775045, 
+         SREBF1_1c_A = ILMN_1663035,
+         SREBF1_1c_I = ILMN_1695378,
+         SREBF1_1a = ILMN_2328986, 
+         sample_ID)
+
+head(gene_data)
+```
+
+This is merged with the full data frame:
+
+```{r}
+metaData <- full_join(metaData, gene_data, by = "sample_ID")
+```
+
+***
+
+15 samples are missing DNAm or expression data. If this is so, they cannot be used in the analysis and are removed.
+Full data is available for 38 samples:
+
+```{r}
+metaData[!complete.cases(metaData),]
+
+metaData <- metaData[complete.cases(metaData),]
+```
+
+***
+
+# Distributions
+
+Look at distributions of each variable:
+
+***
+
+# Correlations
+
+Between cg02235049 and ADIPOQ CPM values:
+
+```{r}
+pdf("Figure_7a.pdf", height=6, width=6)
+metaData %>% 
+  mutate(Days = time/24) %>% 
+  ggplot(aes(x=cg02235049, y=ADIPOQ)) +
+  geom_point(aes(color = Days), size = 3) +
+  scale_color_gradientn(colours = c("#f0dec5", "#e57475")) +
+  geom_smooth(method = "lm", se = F, color = "grey", size = 1, linetype = "dotted") + 
+  stat_cor(color = "black", label.x = 0.58, label.y = 7.6, size=5, r.digits = 3, r.accuracy = 0.001, p.accuracy = 0.001) +
+  scale_x_continuous(limits = c(0.4, 0.7), breaks = c(0.4, 0.5, 0.6, 0.7)) +
+  scale_y_continuous(limits = c(2,8), breaks = c(2,4,6,8)) +
+  ylab(bquote("log"["2"] * " CPM ADIPOQ")) + xlab("DNAm at cg02235049") +
+  theme(
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 13),
+    panel.background = element_blank(),
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black"), 
+    legend.position = c(0.06,0.15),
+    legend.ticks = element_blank()
+  )
+ dev.off()
+```
+
+Using linear models:
+
+```{r}
+fit <- lm(cg02235049 ~ ADIPOQ, data = metaData)
+summary(fit)
+```
+
+
+
+
+

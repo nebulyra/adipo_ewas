@@ -1,0 +1,548 @@
+---
+title: "Adipokine EWAS - Script 3: Saving Cohort Results"
+author: "Lucy Sinke"
+output: html_document
+---
+
+```{r echo=FALSE}
+rm(list=ls())
+```
+
+```{r, setup, include=FALSE}
+knitr::opts_knit$set(root.dir = '/exports/molepi/users/ljsinke/LLS/Adi_Scripts')
+```
+
+***
+
+# Setup
+
+Load packages
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+```
+
+***
+
+# Adiponectin EWAS - Base Model
+
+Our base model, as specified in the common analysis plan, adjusts for `age`, `sex`, `predicted cell counts`, and `technical covariates`.
+
+***
+
+### Leiden Longevity Study (LLS)
+
+Read in the LLS results
+
+```{r}
+load('../Adi_Data/Cohort_Results/LLS/LLS_ln-adi_base.Rdata')
+limma_base <- limma_base %>% 
+  dplyr::select(
+    cpg, 
+    beta_lls = beta, 
+    SE_lls = SE, 
+    p_lls = p, 
+    N_lls = N)
+```
+
+***
+
+### KORA
+
+```{r}
+df <- read_csv2('../Adi_Data/Cohort_Results/KORA/KORA_ln-adiponectin_base.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = cg, 
+    beta_kora = beta,
+    SE_kora = se, 
+    p_kora = p, 
+    N_kora = `N obs`)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+### TwinsUK (TUK)
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/TUK/TUK_ln-adiponectin_base.csv')
+
+df <- df %>% dplyr::select(
+  cpg = CpG, 
+  beta_tuk = beta,
+  SE_tuk = SE, 
+  p_tuk = p, 
+  N_tuk = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+# LifeLines Deep (LLD)
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/LLD/LLD_ln-adiponectin_base.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = CpG, 
+    beta_lld = BETA,
+    SE_lld = SE, 
+    p_lld = P_VAL, 
+    N_lld = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+# SHIP
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/SHIP/SHIP_ln-adiponectin_base.csv.gz')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = CpG, 
+    beta_ship = beta,
+    SE_ship = SE, 
+    p_ship = P, 
+    N_ship = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+
+# GOLDN
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/GOLDN/GOLDN_ln-adiponectin_base.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg, 
+    beta_goldn = Estimate,
+    SE_goldn = Stderr, 
+    p_goldn = ProbZ) %>% 
+  mutate(N_goldn = 994)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = "cpg")
+```
+
+***
+
+### Save ALL
+
+```{r}
+limma_base <- limma_base %>% 
+  dplyr::select(
+    cpg, 
+    starts_with('beta'), 
+    starts_with('SE'),
+    starts_with('p'), 
+    starts_with('N'))
+
+save(limma_base, file='../Adi_Data/Cohort_Results/ALL_ln-adi_base.Rdata')
+```
+
+***
+
+# Adiponectin EWAS - Smoking Sensitivity Analysis
+
+***
+
+### Leiden Longevity Study (LLS)
+
+Read in the LLS results
+
+```{r}
+load('../Adi_Data/Cohort_Results/LLS/LLS_ln-adi_ext1.Rdata')
+limma_base <- limma_base %>% 
+  dplyr::select(
+    cpg, 
+    beta_lls = beta, 
+    SE_lls = SE, 
+    p_lls = p, 
+    N_lls = N)
+```
+
+***
+
+### KORA
+
+```{r}
+df <- read_csv2('../Adi_Data/Cohort_Results/KORA/KORA_ln-adiponectin_ext1.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = cg, 
+    beta_kora = beta,
+    SE_kora = se, 
+    p_kora = p, 
+    N_kora = `N obs`)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+### TwinsUK (TUK)
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/TUK/TUK_ln-adiponectin_ext1.csv')
+
+df <- df %>% dplyr::select(
+  cpg = CpG, 
+  beta_tuk = beta,
+  SE_tuk = SE, 
+  p_tuk = p, 
+  N_tuk = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+# LifeLines Deep (LLD)
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/LLD/LLD_ln-adiponectin_ext1.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = CpG, 
+    beta_lld = BETA,
+    SE_lld = SE, 
+    p_lld = P_VAL, 
+    N_lld = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+# SHIP
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/SHIP/SHIP_ln-adiponectin_ext1.csv.gz')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = CpG, 
+    beta_ship = beta,
+    SE_ship = SE, 
+    p_ship = P, 
+    N_ship = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+# GOLDN
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/GOLDN/GOLDN_ln-adiponectin_ext1.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg, 
+    beta_goldn = Estimate,
+    SE_goldn = Stderr, 
+    p_goldn = ProbZ) %>% 
+  mutate(N_goldn = 994)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = "cpg")
+```
+
+***
+
+### Save ALL
+
+```{r}
+limma_base <- limma_base %>% 
+  dplyr::select(
+    cpg, 
+    starts_with('beta'), 
+    starts_with('SE'),
+    starts_with('p'), 
+    starts_with('N'))
+
+save(limma_base, file='../Adi_Data/Cohort_Results/ALL_ln-adi_ext1.Rdata')
+```
+
+***
+
+# Adiponectin EWAS - BMI Sensitivity Analysis
+
+***
+
+### Leiden Longevity Study (LLS)
+
+Read in the LLS results
+
+```{r}
+load('../Adi_Data/Cohort_Results/LLS/LLS_ln-adi_ext2.Rdata')
+limma_base <- limma_base %>% 
+  dplyr::select(
+    cpg, 
+    beta_lls = beta, 
+    SE_lls = SE, 
+    p_lls = p, 
+    N_lls = N)
+```
+
+***
+
+### KORA
+
+```{r}
+df <- read_csv2('../Adi_Data/Cohort_Results/KORA/KORA_ln-adiponectin_ext2.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = cg, 
+    beta_kora = beta,
+    SE_kora = se, 
+    p_kora = p, 
+    N_kora = `N obs`)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+### TwinsUK (TUK)
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/TUK/TUK_ln-adiponectin_ext2.csv')
+
+df <- df %>% dplyr::select(
+  cpg = CpG, 
+  beta_tuk = beta,
+  SE_tuk = SE, 
+  p_tuk = p, 
+  N_tuk = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+# LifeLines Deep (LLD)
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/LLD/LLD_ln-adiponectin_ext2.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = CpG, 
+    beta_lld = BETA,
+    SE_lld = SE, 
+    p_lld = P_VAL, 
+    N_lld = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+# SHIP
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/SHIP/SHIP_ln-adiponectin_ext2.csv.gz')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = CpG, 
+    beta_ship = beta,
+    SE_ship = SE, 
+    p_ship = P, 
+    N_ship = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+# GOLDN
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/GOLDN/GOLDN_ln-adiponectin_ext2.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg, 
+    beta_goldn = Estimate,
+    SE_goldn = Stderr, 
+    p_goldn = ProbZ) %>% 
+  mutate(N_goldn = 994)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = "cpg")
+```
+
+***
+
+### Save ALL
+
+```{r}
+limma_base <- limma_base %>% 
+  dplyr::select(
+    cpg, 
+    starts_with('beta'), 
+    starts_with('SE'),
+    starts_with('p'), 
+    starts_with('N'))
+
+save(limma_base, file='../Adi_Data/Cohort_Results/ALL_ln-adi_ext2.Rdata')
+```
+
+***
+
+
+***
+
+# Adiponectin EWAS - epidish sensitivity analysis
+
+***
+
+### Leiden Longevity Study (LLS)
+
+Read in the LLS results
+
+```{r}
+load('../Adi_Data/Cohort_Results/LLS/LLS_ln-adi_ext3.Rdata')
+limma_base <- limma_base %>% 
+  dplyr::select(
+    cpg, 
+    beta_lls = beta, 
+    SE_lls = SE, 
+    p_lls = p, 
+    N_lls = N)
+```
+
+***
+
+### KORA
+
+```{r}
+df <- read_csv2('../Adi_Data/Cohort_Results/KORA/KORA_ln-adiponectin_ext3.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = cg, 
+    beta_kora = beta,
+    SE_kora = se, 
+    p_kora = p, 
+    N_kora = N_obs)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+# LifeLines Deep (LLD)
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/LLD/LLD_ln-adiponectin_ext3.csv')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = CpG, 
+    beta_lld = BETA,
+    SE_lld = SE, 
+    p_lld = P_VAL, 
+    N_lld = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+# SHIP
+
+```{r}
+df <- read_csv('../Adi_Data/Cohort_Results/SHIP/SHIP_ln-adiponectin_ext3.gz')
+
+df <- df %>% 
+  dplyr::select(
+    cpg = CpG, 
+    beta_ship = beta,
+    SE_ship = SE, 
+    p_ship = P, 
+    N_ship = N)
+
+limma_base <- full_join(
+  limma_base, df, 
+  by = 'cpg')
+```
+
+***
+
+### Save ALL
+
+```{r}
+limma_base <- limma_base %>% 
+  dplyr::select(
+    cpg, 
+    starts_with('beta'), 
+    starts_with('SE'),
+    starts_with('p'), 
+    starts_with('N'))
+
+save(limma_base, file='../Adi_Data/Cohort_Results/ALL_ln-adi_ext3.Rdata')
+```
+
+***
+
+
+
+
+
+
+
+
+
+
+
+
+
